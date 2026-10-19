@@ -1,0 +1,8 @@
+# 开发期工具依赖（不参与运行时与打包，构建机可不装）
+# 用途：代码审查门禁（格式/静态检查）。配置见 pyproject.toml，流程见 docs/10。
+#
+#   .venv\Scripts\pip install -r requirements-dev.txt
+#   check.bat            （等价于 python scripts/gate.py）
+#
+# 版本下限取 ruff 0.6+（支持 [tool.ruff.lint] 分节配置与 format 子命令）
+ruff>=0.6

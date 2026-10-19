@@ -1,0 +1,34 @@
+# 构建产物
+build/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.tmp/
+# 工具缓存（ruff 等）
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+# 打包中间物
+*.spec.bak
+# 本机配置
+docs/screenshots/_local/
+# 代理工作区（会话记忆，非工程交付物）
+.workbuddy-ai/
+.workbuddy/
+
+# 内部文档（审计/问题记录/优化计划，不随开源仓库发布）
+docs/01-*.md
+docs/02-*.md
+docs/05-*.md
+docs/08-*.md
+docs/09-*.md
+docs/10-*.md
+docs/11-*.md
+docs/12-*.md
+docs/13-*.md
+docs/14-*.md
+# 微软 VC++ 再分发包（25M 二进制，构建时按需放置，见 docs/04）
+deploy/windows/vc_redist.x64.exe
+
+docs/01-*.md

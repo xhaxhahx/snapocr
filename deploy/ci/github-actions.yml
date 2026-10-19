@@ -1,0 +1,61 @@
+name: build-snapocr
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", architecture: "x64" }
+      - run: pip install -r requirements.txt
+      # 模型脚本在 scripts/ 下（不是 snapocr 包内）。失败不炸流水线：缺模型时
+      # 引擎会回落 rapidocr wheel 内置模型（docs/04 §1）。
+      - run: python scripts/download_models.py || true
+      - run: pyinstaller --noconfirm --clean deploy/snapocr.spec
+      - run: powershell Compress-Archive -Path 'dist/snapocr-win64/*' -DestinationPath 'dist/SnapOCR-win64-portable.zip'
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup 6\ISCC.exe").FullName
+          & $iscc deploy/windows/snapocr.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: dist/*
+
+  linux-amd64:
+    runs-on: ubuntu-20.04      # glibc 2.31，覆盖麒麟V10/UOS20（2.28+需在Debian10容器构建更佳）
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.9" }
+      - run: pip install -r requirements-linux.txt
+      - run: pyinstaller --noconfirm --clean deploy/snapocr-linux.spec
+      - run: |
+          sudo apt-get update && sudo apt-get install -y fakeroot
+          bash deploy/linux/build_deb.sh --arch amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: dist/*.deb
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.9" }
+      - run: pip install -r requirements-linux.txt
+      - run: pyinstaller --noconfirm --clean deploy/snapocr-linux.spec
+      - run: |
+          sudo apt-get update && sudo apt-get install -y fakeroot
+          bash deploy/linux/build_deb.sh --arch arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: dist/*.deb

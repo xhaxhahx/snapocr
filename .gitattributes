@@ -1,0 +1,44 @@
+# 行尾与编码规范化：避免不同编辑器/平台 checkout 时行尾被改写
+# 背景：Windows 开发 + Linux(UOS/麒麟) 构建，.bat/.iss 需 CRLF，.sh/.py 需 LF。
+# 未声明 text 的文件按二进制处理，杜绝 git 破坏 ONNX/PNG/ICO。
+
+# ---- 源码与配置：统一 LF ----
+*.py       text eol=lf
+*.md       text eol=lf
+*.toml     text eol=lf
+*.txt      text eol=lf
+*.json     text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.cfg      text eol=lf
+*.ini      text eol=lf
+
+# ---- Windows 专用脚本：必须 CRLF（cmd 解析） ----
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
+# ---- 安装脚本：CRLF，且保留 UTF-8 BOM（Inno Setup 6.3 以前按 BOM 判编码） ----
+# 注意：git 不会自动写 BOM；snapocr.iss 的 BOM 需在文件内保留，
+# 禁止使用会剥离 BOM 的编辑器保存（见 docs/04-构建与发布指南.md）。
+*.iss      text eol=crlf
+
+# ---- Shell 脚本：LF（Linux 构建机执行） ----
+*.sh       text eol=lf
+
+# ---- 二进制资产：禁止任何行尾/编码转换 ----
+*.onnx     binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.ico      binary
+*.icns     binary
+*.exe      binary
+*.dll      binary
+*.zip      binary
+*.7z       binary
+*.pdf      binary
+*.whl      binary
+
+# ---- 语言文件（Inno Setup）：按供应商编码原样处理 ----
+*.isl      text working-tree-encoding=UTF-8

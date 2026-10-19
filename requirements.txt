@@ -1,0 +1,10 @@
+# Windows 开发/构建依赖（Python 3.10-3.12, 64位）
+# 注意: 三件套需锁定 —— OpenCV 5.0 / ORT 1.31 / numpy 2.x 组合在本类环境
+# 存在原生库共占 0xC0000005 问题（见 docs/05-测试报告.md），使用社区验证基线
+PyQt5>=5.15.10,<6
+rapidocr>=2.0,<4
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+onnxruntime==1.20.1
+pyinstaller>=6.0,<7
+comtypes>=1.2,<2 ; sys_platform == "win32"

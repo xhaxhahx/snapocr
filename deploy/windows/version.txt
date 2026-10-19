@@ -1,0 +1,37 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3F,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable("080404b0", [
+        StringStruct("CompanyName", "中共枣庄市委组织部"),
+        StringStruct("FileDescription", "截图工具 - 离线截图OCR工具"),
+        StringStruct("FileVersion", "1.0.0.0"),
+        StringStruct("InternalName", "SnapOCR"),
+        StringStruct("LegalCopyright", "Copyright (C) 2026 中共枣庄市委组织部"),
+        StringStruct("OriginalFilename", "SnapOCR.exe"),
+        StringStruct("ProductName", "截图工具"),
+        StringStruct("ProductVersion", "1.0.0.0"),
+      ]),
+      StringTable("040904b0", [
+        StringStruct("CompanyName", "CPZZ Zaozhuang Municipal Committee Organization Dept."),
+        StringStruct("FileDescription", "SnapOCR - offline screenshot OCR tool"),
+        StringStruct("FileVersion", "1.0.0.0"),
+        StringStruct("InternalName", "SnapOCR"),
+        StringStruct("LegalCopyright", "Copyright (C) 2026"),
+        StringStruct("OriginalFilename", "SnapOCR.exe"),
+        StringStruct("ProductName", "SnapOCR"),
+        StringStruct("ProductVersion", "1.0.0.0"),
+      ]),
+    ]),
+    VarFileInfo([VarStruct("Translation", [2052, 1200, 1033, 1200])]),
+  ],
+)

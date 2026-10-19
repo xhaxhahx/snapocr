@@ -1,0 +1,10 @@
+# Linux 信创构建依赖（在 UOS 20/麒麟 V10 同级 glibc 环境使用 Python 3.8-3.11）
+# 注意: 锁定 manylinux2014 兼容版本, 保证 glibc>=2.17 可运行
+# 三件套锁定原因同 requirements.txt（稳定性基线）
+PyQt5>=5.15.10,<6
+rapidocr>=2.0,<4
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+onnxruntime==1.20.1 ; python_version >= "3.9"
+onnxruntime==1.19.2 ; python_version < "3.9"
+pyinstaller>=5.13,<7

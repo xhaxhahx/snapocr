@@ -1,0 +1,61 @@
+# =============================================================================
+# SnapOCR 代码规范 / 静态检查配置（唯一事实来源）
+#
+# 说明：本文件只承载「工具配置」，不声明构建后端 —— 本工程不是 pip 安装包，
+#       开发运行走 `python src/run.py`，打包走 deploy/*.spec。
+#
+# 规范正文、例外理由与评审流程见：docs/10-代码审查标准与流程.md
+# 一键门禁见：scripts/gate.py
+# =============================================================================
+
+[tool.ruff]
+# 行长上限：与工程既有排版一致（中文注释较多的行按显示宽度计，100 已是宽松值）
+line-length = 100
+# 兼容下限：Linux 构建机要求 Python 3.8（见 docs/04 §0），故不得使用 3.9+ 专属语法
+target-version = "py38"
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    ".tmp",
+    "__pycache__",
+    # 历史一次性调试脚本（_dbg_* / _probe_*）：不参与门禁，仅作归档
+    "scripts/archive",
+]
+
+[tool.ruff.lint]
+# 规则集选择原则：先「正确性」后「风格」，宁少而精，避免大面积无意义改写。
+#   E/W   pycodestyle 错误与告警（含行长、空行、语句结构）
+#   F     pyflakes：未定义名、未用导入/变量、重定义
+#   I     isort：导入分组与排序
+#   B     flake8-bugbear：常见逻辑陷阱（可变默认值、静默吞异常等）
+#   C4    flake8-comprehensions：推导式/生成器写法
+#   SIM   flake8-simplify：可化简的控制流
+#   RUF   ruff 自有规则（含 RUF100 无效 noqa）
+#   UP    pyupgrade：按 target-version 做语法现代化
+select = ["E", "F", "W", "I", "B", "C4", "SIM", "RUF", "UP"]
+
+ignore = [
+    # 工程既有约定：每个 .py 首行保留 `# -*- coding: utf-8 -*-`
+    # （Windows 记事本/老工具链友好，30+ 文件已统一，不值得为"冗余"全量改动）
+    "UP009",
+    # `%` 格式化：与 logging 的惰性求值写法（logger.info("%s", x)）保持一致，
+    # 且 i18n 的 tr() 模板本身就用 {} 占位，两套混排改成 f-string 反而更乱
+    "UP031",
+    # 中文文本刻意使用全角标点（，。：（）—— 等），这是中文排版的正解；
+    # ruff 的"歧义 Unicode"规则只适用于英文语境，全工程 800+ 处会误报，必须忽略
+    "RUF001",  # 字符串
+    "RUF002",  # docstring
+    "RUF003",  # 注释
+]
+
+[tool.ruff.lint.isort]
+# 本地包名，避免被归入第三方分组
+known-first-party = ["snapocr"]
+
+[tool.ruff.format]
+# 采用 ruff 官方格式化（PEP8 风格），与 lint 共用 line-length
+quote-style = "double"
+indent-style = "space"
+# 行尾保持文件原样（不强制 LF）：工程为 Windows 优先，避免无意义的整库换行符改写
+line-ending = "auto"
