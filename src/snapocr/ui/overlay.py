@@ -404,7 +404,15 @@ class OverlayWindow(QWidget):
         return QRectF(bx, by, box, box)
 
     def _update_magnifier_dirty(self, new_pos):
-        """只重绘放大镜小窗（旧框∪新框），避免 4K 下每次移动整屏重绘。"""
+        """只重绘放大镜小窗（旧框∪新框），避免 4K 下每次移动整屏重绘。
+
+        余量必须 ≥8 逻辑像素（2026-10-21 客户机实测 + 本地 QT_SCALE_FACTOR=1.25 复现）：
+        dpr≠1 时 Qt 把逻辑 dirty rect 换算设备像素存在 rounding，叠加放大镜
+        1.5px 笔宽、drawImage 的 dpr 缩放边缘与 toAlignedRect 取整，±3 会让
+        放大镜经过的每一行残留一条未暗化底图（表现为竖条/横条拖影，步距=鼠标
+        每帧位移）。实测 ±3 残影 2747px、±8 与 ±20 均为 0px，取 ±8（够用且
+        不显著放大重绘区域）。
+        """
         old = self._mag_rect
         new = self._magnifier_rect(new_pos)
         self._mag_rect = new
@@ -416,7 +424,7 @@ class OverlayWindow(QWidget):
             r = old
         else:
             r = old.united(new)
-        self.update(r.toAlignedRect().adjusted(-3, -3, 3, 3))
+        self.update(r.toAlignedRect().adjusted(-8, -8, 8, 8))
 
     def _draw_magnifier(self, p, pos):
         zoom = MAG_ZOOM

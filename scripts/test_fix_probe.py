@@ -307,7 +307,7 @@ def main():
     from probes.ux_suite import Ctx
     from probes.ux_suite import run as run_ux_suite
 
-    run_ux_suite(Ctx(app=app, scr=scr, cfg=cfg, check=check))
+    run_ux_suite(Ctx(app=app, scr=scr, cfg=cfg, check=check, skip=skip))
 
     # ---- UX-22 第二轮修复回归（橡皮双圈光标 / IPC 断开清理 / 文件名 i18n）----
     # 1) 橡皮光标：外圈按 max(8,档位) 兜底，内圈按真实擦除直径（强调色虚线）

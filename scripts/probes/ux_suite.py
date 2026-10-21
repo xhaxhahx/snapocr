@@ -94,6 +94,7 @@ def run(ctx):
     scr = ctx.scr
     cfg = ctx.cfg
     check = ctx.check
+    skip = getattr(ctx, "skip", lambda name, reason="": None)
     # ---- UX-16 遮罩选区域取景 dpr 正确性（125%/200% 缩放不错位）----
     # Qt 语义：drawPixmap(point, pixmap, sourceRect) 的 sourceRect 是设备像素矩形。
     # 历史 bug：paintEvent 直接传逻辑 sel → dpr≠1 时选区内只有左上角 1/dpr² 面积
@@ -437,7 +438,8 @@ def run(ctx):
         and _r.right() >= ovd.width()
         and _r.bottom() >= ovd.height(),
     )
-    # 放大镜脏区必须完整覆盖放大镜矩形（拖动/hover 时旧 tile 才能被清除）
+    # 放大镜脏区必须覆盖放大镜矩形外扩 8px（dpr≠1 的 rounding + 1.5px 笔宽 +
+    # drawImage 缩放边缘；实测 ±3 在 125% 缩放下每步残留一行，±8 清零）
     ovd._mouse_pos = QPointF(100, 100)
     _caught2 = []
     ovd.update = lambda r: _caught2.append(r)
@@ -446,9 +448,45 @@ def run(ctx):
     ovd.update = _orig_update
     _expect = ovd._magnifier_rect(QPointF(100, 100))
     check(
-        "UX-23 放大镜脏区覆盖放大镜矩形",
-        bool(_caught2) and _caught2[0].contains(_expect.toAlignedRect()),
+        "UX-23 放大镜脏区余量≥8px",
+        bool(_caught2) and _caught2[0].contains(_expect.toAlignedRect().adjusted(-8, -8, 8, 8)),
     )
+    # 真实复现路径（需 dpr≠1 屏幕或 QT_SCALE_FACTOR 环境）：从右下往左上 hover
+    # 移动——该方向会触发 _magnifier_rect 的翻转分支，是残影的确定性触发条件。
+    ovd.hide()
+    ovd.deleteLater()
+    app.processEvents()
+    _dpr = scr.devicePixelRatio()
+    if abs(_dpr - 1.0) > 0.01:
+        # 底图必须与屏幕同 dpr（否则 overlay.self.dpr 与真实窗口 dpr 不一致，
+        # 放大镜 tile 的缩放基准就错了，测不出真实残影）
+        _qimg = _sample_image(int(scr.size().width() * _dpr), int(scr.size().height() * _dpr))
+        _qpm = QPixmap.fromImage(_qimg)
+        _qpm.setDevicePixelRatio(_dpr)
+        ovh = OverlayWindow(scr, _qpm, cfg)
+        ovh.show()
+        app.processEvents()
+        ovh.start()
+        app.processEvents()
+        for _i in range(30):
+            ovh.mouseMoveEvent(_sweep_move(QPointF(1400 - _i * 40, 780 - _i * 23)))
+            app.processEvents()
+        _g1 = scr.grabWindow(int(ovh.winId())).toImage()
+        ovh.repaint()
+        app.processEvents()
+        _g2 = scr.grabWindow(int(ovh.winId())).toImage()
+        _d = sum(
+            1
+            for _y in range(_g1.height())
+            for _x in range(_g1.width())
+            if _g1.pixelColor(_x, _y) != _g2.pixelColor(_x, _y)
+        )
+        check("UX-23 HiDPI 右下→左上 hover 无残影", _d == 0)
+        ovh.hide()
+        ovh.deleteLater()
+        app.processEvents()
+    else:
+        skip("UX-23 HiDPI hover 复现", "dpr=1.0，需高分屏或 QT_SCALE_FACTOR")
     # 底图显式铺满：paintEvent 用目标矩形而非隐式尺寸
     ovd.repaint()
     check(
