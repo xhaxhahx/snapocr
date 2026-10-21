@@ -406,24 +406,29 @@ class OverlayWindow(QWidget):
     def _update_magnifier_dirty(self, new_pos):
         """只重绘放大镜小窗（旧框∪新框），避免 4K 下每次移动整屏重绘。
 
-        余量必须 ≥8 逻辑像素（2026-10-21 客户机实测 + 本地 QT_SCALE_FACTOR=1.25 复现）：
-        dpr≠1 时 Qt 把逻辑 dirty rect 换算设备像素存在 rounding，叠加放大镜
-        1.5px 笔宽、drawImage 的 dpr 缩放边缘与 toAlignedRect 取整，±3 会让
-        放大镜经过的每一行残留一条未暗化底图（表现为竖条/横条拖影，步距=鼠标
-        每帧位移）。实测 ±3 残影 2747px、±8 与 ±20 均为 0px，取 ±8（够用且
-        不显著放大重绘区域）。
+        两条硬约束（均来自 2026-10-21 客户机实测 + 本地 QT_SCALE_FACTOR=1.25 复现）：
+
+        1. **余量必须 ≥8 逻辑像素**：dpr≠1 时 Qt 把逻辑 dirty rect 换算设备像素
+           存在 rounding，叠加放大镜 1.5px 笔宽、drawImage 的 dpr 缩放边缘与
+           toAlignedRect 取整，±3 会让放大镜经过的每一行残留一条未暗化底图
+           （竖条/横条拖影，步距=鼠标每帧位移）。实测 ±3 残影 2747px、±8 为 0px。
+        2. **位置跳变（贴边缘触发 _magnifier_rect 翻转）必须走全量**：翻转使旧/新
+           框单帧相距可达 136px（by 从 pos.y()-138 跳到 pos.y()+18），又高又窄的
+           dirty 矩形在设备像素 rounding 下会漏列，逐帧累积成整列竖条
+           （客户机报告"贴边缘滑动有竖线、开始框选后放大镜变两个"——后者即
+           hover 期残留的放大镜碎片与新放大镜叠加）。跳变帧走 _update_all()
+           彻底消除；贴边缘是少数情况，全量开销可忽略。
         """
         old = self._mag_rect
         new = self._magnifier_rect(new_pos)
         self._mag_rect = new
         if old is None and new is None:
             return
-        if old is None:
-            r = new
-        elif new is None:
-            r = old
-        else:
-            r = old.united(new)
+        if old is None or new is None or abs(new.x() - old.x()) > 40 or abs(new.y() - old.y()) > 40:
+            # 首帧 / 指针越界 / 翻转跳变：全量重绘，不做局部脏区
+            self._update_all()
+            return
+        r = old.united(new)
         self.update(r.toAlignedRect().adjusted(-8, -8, 8, 8))
 
     def _draw_magnifier(self, p, pos):
@@ -442,10 +447,16 @@ class OverlayWindow(QWidget):
         # 源区不变时复用上一帧的缩放图，避免每帧 copy+scale
         key = (src.x(), src.y(), src.width(), src.height())
         if self._mag_cache is None or self._mag_key != key:
+            # IgnoreAspectRatio（非 KeepAspectRatioByExpanding）：指针贴屏幕边缘时
+            # src 被 img.rect() 裁成非正方形（如 15×30），等比扩展会产出超出目标的
+            # tile（150×300），drawImage 随之画出比放大镜框大一倍的区域，超出脏区的
+            # 部分永久残留在 backing store —— 客户机报告"贴边缘滑动出竖线"的根因。
+            # 放大镜语义就是把 src 区域拉伸填满方框，各向异性拉伸才是正确行为
+            # （src 为正方形时两种模式等价，故此前未暴露）。
             tile = self.img.copy(src).scaled(
                 int(box * self.dpr),
                 int(box * self.dpr),
-                Qt.KeepAspectRatioByExpanding,
+                Qt.IgnoreAspectRatio,
                 Qt.FastTransformation,
             )
             tile.setDevicePixelRatio(self.dpr)

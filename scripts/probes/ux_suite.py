@@ -13,6 +13,7 @@ import os
 from PyQt5.QtCore import QElapsedTimer, QEvent, QPointF, QRectF, Qt
 from PyQt5.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPixmap
 from PyQt5.QtNetwork import QLocalSocket as _QLocalSocket
+from PyQt5.QtTest import QTest as _QTest
 
 from snapocr import i18n as _i18n
 from snapocr.tests.selftest import _sample_image
@@ -451,11 +452,16 @@ def run(ctx):
         "UX-23 放大镜脏区余量≥8px",
         bool(_caught2) and _caught2[0].contains(_expect.toAlignedRect().adjusted(-8, -8, 8, 8)),
     )
-    # 真实复现路径（需 dpr≠1 屏幕或 QT_SCALE_FACTOR 环境）：从右下往左上 hover
-    # 移动——该方向会触发 _magnifier_rect 的翻转分支，是残影的确定性触发条件。
+    # 底图显式铺满：paintEvent 用目标矩形而非隐式尺寸
+    ovd.repaint()
+    check(
+        "UX-23 底图显式铺满目标矩形", "QRect(0, 0, self.width(), self.height())" in _src_overlay()
+    )
     ovd.hide()
     ovd.deleteLater()
     app.processEvents()
+    # 真实复现路径（需 dpr≠1 屏幕或 QT_SCALE_FACTOR 环境）：从右下往左上 hover
+    # 移动——该方向会触发 _magnifier_rect 的翻转分支，是残影的确定性触发条件。
     _dpr = scr.devicePixelRatio()
     if abs(_dpr - 1.0) > 0.01:
         # 底图必须与屏幕同 dpr（否则 overlay.self.dpr 与真实窗口 dpr 不一致，
@@ -487,11 +493,44 @@ def run(ctx):
         app.processEvents()
     else:
         skip("UX-23 HiDPI hover 复现", "dpr=1.0，需高分屏或 QT_SCALE_FACTOR")
-    # 底图显式铺满：paintEvent 用目标矩形而非隐式尺寸
-    ovd.repaint()
-    check(
-        "UX-23 底图显式铺满目标矩形", "QRect(0, 0, self.width(), self.height())" in _src_overlay()
-    )
-    ovd.hide()
-    ovd.deleteLater()
-    app.processEvents()
+
+    # ---- UX-24 贴屏幕边缘 hover 无残影（2026-10-22 客户机反馈）----
+    # 根因：指针贴边时 _draw_magnifier 的 src 被 img.rect() 裁成非正方形，
+    # scaled(KeepAspectRatioByExpanding) 产出超标 tile（如 150×300），drawImage
+    # 画出比放大镜框大一倍的区域 → 超出脏区的部分永久残留（竖线/横线）。
+    # 修复：IgnoreAspectRatio + 翻转/跳变帧走全量。
+    if abs(_dpr - 1.0) > 0.01:
+        _W, _H = scr.size().width(), scr.size().height()
+
+        def _edge_case(title, paths):
+            _o = OverlayWindow(scr, _qpm, cfg)
+            _o.show()
+            app.processEvents()
+            _o.start()
+            app.processEvents()
+            for _pos in paths:
+                _o.mouseMoveEvent(_sweep_move(_pos))
+                _QTest.qWait(8)
+            _a = scr.grabWindow(int(_o.winId())).toImage()
+            _o.repaint()
+            app.processEvents()
+            _b = scr.grabWindow(int(_o.winId())).toImage()
+            _d = sum(
+                1
+                for _y in range(_a.height())
+                for _x in range(_a.width())
+                if _a.pixelColor(_x, _y) != _b.pixelColor(_x, _y)
+            )
+            check("UX-24 %s" % title, _d == 0)
+            _o.hide()
+            _o.deleteLater()
+            app.processEvents()
+            _QTest.qWait(150)
+
+        # _qpm 复用 UX-23 已构造的屏幕尺寸底图
+        _edge_case("贴右边缘 下→上", [QPointF(_W - 8, _H - 10 - _i * 20) for _i in range(20)])
+        _edge_case("贴上边缘 右→左", [QPointF(_W - 10 - _i * 30, 8) for _i in range(20)])
+        _edge_case("贴左边缘 下→上", [QPointF(8, _H - 10 - _i * 20) for _i in range(20)])
+        _edge_case("贴右下角原地抖动", [QPointF(_W - 6, _H - 6) for _i in range(10)])
+    else:
+        skip("UX-24 贴边缘 hover 复现", "dpr=1.0，需高分屏或 QT_SCALE_FACTOR")
