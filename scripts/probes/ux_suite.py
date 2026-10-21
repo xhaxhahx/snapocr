@@ -81,6 +81,13 @@ def _sweep_release(pos):
     )
 
 
+def _src_overlay() -> str:
+    """读取 overlay 源码（供源码级不变量断言）。"""
+    from pathlib import Path as _P
+
+    return _P("src/snapocr/ui/overlay.py").read_text(encoding="utf-8")
+
+
 def run(ctx):
     """执行 UX-16 ~ UX-21 全部断言（断言计数由主文件的 check 回调累加）。"""
     app = ctx.app
@@ -404,4 +411,49 @@ def run(ctx):
     _tb_i.deleteLater()
     _i18n.init_lang("zh")
     check("UX-21 档位键中文回落", _i18n.tr("width_thin") == "细")
+    app.processEvents()
+
+    # ---- UX-23 dpr≠1 拖动残影防御（2026-10-21 客户机反馈）----
+    # 现象：Windows 100% 缩放拖动选区正常；>100%（125%/150%/200%）出现竖条残影。
+    # 根因（代码推理 + 本地 QT_SCALE_FACTOR 模拟无法复现，属合成层差异）：
+    #   dpr≠1 时 Qt 把逻辑 dirty rect 换算设备像素存在 rounding，若 backing store
+    #   宽 = ceil(w*dpr) 而 dirty 宽 = floor(w*dpr)，最右/最下一列设备像素永不重绘；
+    #   隐式 drawPixmap(0,0,pm) 的底图尺寸也可能差 1 设备像素。
+    # 修复：全量更新走 _update_all()（目标 rect 外扩 1 逻辑 px）+ 底图显式铺满
+    #   目标矩形 + 放大镜脏区余量 ±3。以下断言守住这三个不变量。
+    ovd = OverlayWindow(scr, QPixmap.fromImage(_sample_image(800, 600)), cfg)
+    ovd.show()
+    app.processEvents()
+    _caught = []
+    _orig_update = ovd.update
+    ovd.update = lambda r: _caught.append(r)
+    ovd._update_all()
+    ovd.update = _orig_update
+    _r = _caught[0]
+    check(
+        "UX-23 全量更新覆盖窗口+1px",
+        _r.left() <= -1
+        and _r.top() <= -1
+        and _r.right() >= ovd.width()
+        and _r.bottom() >= ovd.height(),
+    )
+    # 放大镜脏区必须完整覆盖放大镜矩形（拖动/hover 时旧 tile 才能被清除）
+    ovd._mouse_pos = QPointF(100, 100)
+    _caught2 = []
+    ovd.update = lambda r: _caught2.append(r)
+    ovd._mag_rect = None
+    ovd._update_magnifier_dirty(QPointF(100, 100))
+    ovd.update = _orig_update
+    _expect = ovd._magnifier_rect(QPointF(100, 100))
+    check(
+        "UX-23 放大镜脏区覆盖放大镜矩形",
+        bool(_caught2) and _caught2[0].contains(_expect.toAlignedRect()),
+    )
+    # 底图显式铺满：paintEvent 用目标矩形而非隐式尺寸
+    ovd.repaint()
+    check(
+        "UX-23 底图显式铺满目标矩形", "QRect(0, 0, self.width(), self.height())" in _src_overlay()
+    )
+    ovd.hide()
+    ovd.deleteLater()
     app.processEvents()

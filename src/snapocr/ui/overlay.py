@@ -12,7 +12,7 @@
 import os
 import time
 
-from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import QLabel, QWidget
 
@@ -230,7 +230,7 @@ class OverlayWindow(QWidget):
         self._on_edit_toggle(True)  # 编辑菜单默认展开
         self.toolbar.show()
         self.toolbar.raise_()
-        self.update()
+        self._update_all()
 
     def _set_canvas_passthrough(self):
         """选择工具/未展开时画布对鼠标透明 → 遮罩处理移动/微调；绘制工具激活才接管。"""
@@ -286,11 +286,29 @@ class OverlayWindow(QWidget):
         self.toolbar.move(int(x), int(y))
 
     # ---------- 绘制 ----------
+    def _update_all(self):
+        """全窗口重绘（显式目标矩形，外扩 1 逻辑像素）。
+
+        为什么不用无参 `update()`：dpr≠1（125%/150%/200% 缩放）时 Qt 把逻辑 dirty
+        rect 换算成设备像素存在 rounding——若 backing store 宽 = ceil(w*dpr) 而
+        dirty 宽 = floor(w*dpr)，最右/最下一列设备像素**永远不在脏区里**，拖动选区
+        时该列残留上一帧内容，表现为**竖条残影**（客户机实测，100% 缩放不出现，
+        因 dpr=1 无 rounding）。外扩 1 逻辑像素（≥1 设备像素）可覆盖该缺口。
+        """
+        self.update(QRect(0, 0, self.width(), self.height()).adjusted(-1, -1, 1, 1))
+
     def paintEvent(self, ev):
         t = getattr(self, "_t", None) or theme.current()
         accent = t.accent
         p = QPainter(self)
-        p.drawPixmap(0, 0, self.pm)
+        # 底图显式铺满目标矩形（不用 drawPixmap(0,0,pm) 的隐式尺寸）：
+        # dpr≠1 时 pixmap 逻辑尺寸与窗口逻辑尺寸的 rounding 可能差 1 设备像素，
+        # 隐式绘制会漏掉最右/最下一列 → 竖条残影。显式 target rect 由 Qt 拉伸铺满。
+        p.drawPixmap(
+            QRect(0, 0, self.width(), self.height()),
+            self.pm,
+            QRect(0, 0, self.pm.width(), self.pm.height()),
+        )
         p.fillRect(self.rect(), QColor(0, 0, 0, 110))
         # 兼容性关键：表面须含不透明区域，否则部分环境 DWM 丢弃首帧
         p.fillRect(0, 0, self.width(), 2, accent)
@@ -398,7 +416,7 @@ class OverlayWindow(QWidget):
             r = old
         else:
             r = old.united(new)
-        self.update(r.toAlignedRect().adjusted(-2, -2, 2, 2))
+        self.update(r.toAlignedRect().adjusted(-3, -3, 3, 3))
 
     def _draw_magnifier(self, p, pos):
         zoom = MAG_ZOOM
@@ -529,14 +547,14 @@ class OverlayWindow(QWidget):
         self.drag_start = QPointF(ev.pos())
         self.press_pos = QPointF(ev.pos())
         self.sel = QRectF(self.drag_start, self.drag_start)
-        self.update()
+        self._update_all()
 
     def mouseMoveEvent(self, ev):
         pos = ev.pos()
         self._mouse_pos = QPointF(pos)
         if self.dragging:
             self.sel = QRectF(self.drag_start, QPointF(pos)).normalized()
-            self.update()
+            self._update_all()
             return
         if self.finalized:
             if self.drag_mode == "move":
@@ -555,7 +573,7 @@ class OverlayWindow(QWidget):
             h = self._detect_window(pos)
             if h != self.hover_rect:
                 self.hover_rect = h
-                self.update()  # 高亮框变化：整屏重绘一次
+                self._update_all()  # 高亮框变化：整屏重绘一次
             else:
                 self._update_magnifier_dirty(QPointF(pos))  # 否则只重绘放大镜小窗
 
@@ -595,7 +613,7 @@ class OverlayWindow(QWidget):
             self.canvas.set_base(self.img.copy(self._dev_rect(self._content_rect())))
             self.canvas.shift_strokes(-delta.x() * self.dpr, -delta.y() * self.dpr)
         self._reposition_toolbar()
-        self.update()
+        self._update_all()
 
     def _resize(self, pos):
         r = QRectF(self.sel)
@@ -622,7 +640,7 @@ class OverlayWindow(QWidget):
             self.canvas.set_base(self.img.copy(self._dev_rect(self._content_rect())))
             self.canvas.shift_strokes(-delta.x() * self.dpr, -delta.y() * self.dpr)
         self._reposition_toolbar()
-        self.update()
+        self._update_all()
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.RightButton:
@@ -644,7 +662,7 @@ class OverlayWindow(QWidget):
                 self.sel = QRectF(self.hover_rect)  # 单击选中识别到的窗口
             if self.sel is None or self.sel.width() < 8 or self.sel.height() < 8:
                 self.sel = None
-                self.update()
+                self._update_all()
                 return
             self._finalize()
             return
