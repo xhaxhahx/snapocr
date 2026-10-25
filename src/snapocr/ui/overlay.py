@@ -133,6 +133,7 @@ class OverlayWindow(QWidget):
         self.toolbar.ocrClicked.connect(self._ocr)
         self.toolbar.set_ocr_active(False)
         self.toolbar.copyClicked.connect(self._copy)
+        self.toolbar.copyFileClicked.connect(self._copy_as_file)
         self.toolbar.saveClicked.connect(self._save)
         self.toolbar.cancelClicked.connect(self.cancelled)
 
@@ -869,6 +870,24 @@ class OverlayWindow(QWidget):
         # 写入后回读校验（被占用时重试），失败如实提示，不再无条件报"已复制"
         ok = clip.set_image(self.composite())
         self._toast(tr("copied") if ok else tr("copy_failed"))
+
+    def _copy_as_file(self):
+        """把标注图复制为 JPG 文件到剪贴板（弹窗输入文件名，默认同保存默认名）。"""
+        from PyQt5.QtWidgets import QInputDialog
+
+        default = tr("default_filename_jpg") % time.strftime("%Y%m%d_%H%M%S")
+        text, ok = QInputDialog.getText(
+            self, tr("copy_as_file"), tr("filename_label"), text=default
+        )
+        if not ok or not text.strip():
+            return
+        self.canvas._commit_pending_text()
+        path = clip.copy_image_as_file(self.composite(), text)
+        self._toast(
+            tr("copied_as_file", os.path.basename(path))
+            if path
+            else tr("copy_file_failed", text.strip())
+        )
 
     def _save(self):
         from PyQt5.QtWidgets import QFileDialog

@@ -56,14 +56,16 @@ class PreviewDialog(QWidget):
 
         btns = QHBoxLayout()
         self.btn_copy = QPushButton(tr("preview_copy") + "  (Ctrl+C)", objectName="primary")
-        self.btn_save = QPushButton(tr("preview_save") + "  (Ctrl+S)")
+        self.btn_file = QPushButton(tr("copy_as_jpg"))
+        self.btn_save = QPushButton(tr("preview_save"))
         self.btn_retry = QPushButton(tr("preview_retry"))
         self.btn_cancel = QPushButton(tr("preview_cancel"))
-        for b in (self.btn_copy, self.btn_save, self.btn_retry, self.btn_cancel):
+        for b in (self.btn_copy, self.btn_file, self.btn_save, self.btn_retry, self.btn_cancel):
             btns.addWidget(b)
         root.addLayout(btns)
 
         self.btn_copy.clicked.connect(self._copy)
+        self.btn_file.clicked.connect(self._copy_as_file)
         self.btn_save.clicked.connect(self._save)
         self.btn_retry.clicked.connect(self._retry)
         self.btn_cancel.clicked.connect(self._cancel)
@@ -125,7 +127,7 @@ class PreviewDialog(QWidget):
     # ---------- 动作（防抖） ----------
     def _set_busy(self, busy):
         self._busy = busy
-        for b in (self.btn_copy, self.btn_save, self.btn_retry, self.btn_cancel):
+        for b in (self.btn_copy, self.btn_file, self.btn_save, self.btn_retry, self.btn_cancel):
             b.setEnabled(not busy)
 
     def keyPressEvent(self, ev):
@@ -157,6 +159,28 @@ class PreviewDialog(QWidget):
         else:
             # 剪贴板被占用：留在预览窗并如实报错，不再假装复制成功
             self.meta.setText(tr("copy_failed"))
+
+    def _copy_as_file(self):
+        """把预览图复制为 JPG 文件到剪贴板（弹窗输入文件名，默认同保存默认名）。"""
+        if self._busy:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+
+        from . import clipboard as clip
+
+        default = tr("default_filename_jpg") % time.strftime("%Y%m%d_%H%M%S")
+        text, ok = QInputDialog.getText(
+            self, tr("copy_as_file"), tr("filename_label"), text=default
+        )
+        if not ok or not text.strip():
+            return
+        self._set_busy(True)
+        path = clip.copy_image_as_file(self.image, text)
+        self._set_busy(False)
+        if path:
+            self.copyDone.emit()  # 与「复制」同语义：成功即结束会话
+        else:
+            self.meta.setText(tr("copy_file_failed", text.strip()))
 
     def _save(self):
         if self._busy:

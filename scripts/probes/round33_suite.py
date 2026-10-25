@@ -654,3 +654,80 @@ def run(ctx):
     tbx.deleteLater()
     sdx.deleteLater()
     check("X3 全部下拉换用靠边自适应类", x3)
+
+    # ---- Y1~Y5 复制为文件（2026-10-26 新功能） ----
+    from PyQt5.QtGui import QGuiApplication
+
+    from snapocr.ui import clipboard as clipmod
+    from snapocr.ui.preview_dialog import PreviewDialog
+
+    # Y1 图片复制为 JPG 文件：落盘 + 剪贴板带文件 URL；不带图像数据（用户口径）
+    img_y = QImage(60, 40, QImage.Format_RGB888)
+    img_y.fill(Qt.red)
+    p1 = clipmod.copy_image_as_file(img_y, "y测试")
+    cb_y = QGuiApplication.clipboard()
+    md_y = cb_y.mimeData()
+    y1 = (
+        p1 is not None
+        and p1.endswith("y测试.jpg")
+        and os.path.isfile(p1)
+        and md_y.hasUrls()
+        and os.path.normpath(md_y.urls()[0].toLocalFile()) == os.path.normpath(p1)
+        and not md_y.hasImage()
+    )
+    check("Y1 图片复制为JPG文件(仅文件形态)", y1)
+
+    # Y2 文本复制为 TXT 文件：utf-8-sig 内容 + 文件 URL
+    p2 = clipmod.copy_text_as_file("中文内容 Y2", "y文本")
+    with open(p2, "rb") as f:
+        head_y = f.read(3)
+    with open(p2, encoding="utf-8-sig") as f:
+        body_y = f.read()
+    md_y2 = cb_y.mimeData()
+    y2 = (
+        p2 is not None
+        and p2.endswith("y文本.txt")
+        and head_y == b"\xef\xbb\xbf"
+        and body_y == "中文内容 Y2"
+        and md_y2.hasUrls()
+        and os.path.normpath(md_y2.urls()[0].toLocalFile()) == os.path.normpath(p2)
+        # hasText() 对 uri-list 有回落（Qt 既定行为），"仅文件"看格式表：不含 text/plain
+        and "text/plain" not in md_y2.formats()
+    )
+    check("Y2 文本复制为TXT文件(utf-8-sig,仅文件形态)", y2)
+
+    # Y3 同名去重 + 空名拒绝
+    p3 = clipmod.copy_text_as_file("dup", "y文本")
+    y3 = p3 is not None and p3 != p2 and clipmod.copy_text_as_file("x", "  ") is None
+    check("Y3 同名去重/空名拒绝", y3)
+
+    # Y4 三处按钮存在并接线；结果窗可用态同步（busy 置灰 → 有内容恢复）
+    tby = EditorToolbar()
+    rwy = ResultWindow(cfg=Config())
+    pvy = PreviewDialog(img_y, ctx.cfg)
+    y4 = (
+        bool(tby.btn_copyfile.text().strip())
+        and rwy.btn_copyfile is not None
+        and pvy.btn_file is not None
+    )
+    rwy.begin_stream()
+    y4b = rwy.btn_copyfile.isEnabled() is False
+    rwy.set_results([("文本", 0.9, None)], 0.1)
+    y4c = rwy.btn_copyfile.isEnabled()
+    tby.deleteLater()
+    rwy.close()
+    rwy.deleteLater()
+    pvy.deleteLater()
+    check("Y4 三处按钮+可用态同步", y4 and y4b and y4c)
+
+    # Y5 启动清理接线 + i18n 双语齐备；清掉探针刚写的文件（不留垃圾）
+    y5 = (
+        "cleanup_clip_files" in _src("src/snapocr/main.py")
+        and _i18n._ZH.get("copy_as_file") is not None
+        and _i18n._EN.get("copy_as_file") is not None
+        and _i18n._EN.get("default_filename_jpg") == "screenshot_%s.jpg"
+        and _i18n._ZH.get("default_filename_jpg") == "截图_%s.jpg"
+    )
+    clipmod.cleanup_clip_files()
+    y5 = y5 and not os.path.exists(os.path.dirname(p1))
+    check("Y5 启动清理+i18n双语齐备", y5)

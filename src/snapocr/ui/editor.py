@@ -108,6 +108,7 @@ class EditorToolbar(QWidget):
     clearClicked = pyqtSignal()
     ocrClicked = pyqtSignal()
     copyClicked = pyqtSignal()
+    copyFileClicked = pyqtSignal()
     saveClicked = pyqtSignal()
     cancelClicked = pyqtSignal()
 
@@ -158,6 +159,13 @@ class EditorToolbar(QWidget):
         self.btn_copy.setToolTip(tr("copy") + " (Ctrl+C)")
         self.btn_copy.clicked.connect(self.copyClicked)
         rowA.addWidget(self.btn_copy)
+
+        self.btn_copyfile = QToolButton()
+        self.btn_copyfile.setText(tr("copy_file"))
+        self.btn_copyfile.setProperty("textBtn", True)
+        self.btn_copyfile.setToolTip(tr("copy_file_img_tip"))
+        self.btn_copyfile.clicked.connect(self.copyFileClicked)
+        rowA.addWidget(self.btn_copyfile)
 
         self.btn_save = QToolButton()
         self.btn_save.setText(tr("save"))

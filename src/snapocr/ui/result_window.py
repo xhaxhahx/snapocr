@@ -138,12 +138,14 @@ class ResultWindow(QWidget):
 
         btns = QHBoxLayout()
         self.btn_copy = QPushButton(tr("ocr_copy_text"))
+        self.btn_copyfile = QPushButton(tr("copy_as_txt_file"))
         self.btn_save = QPushButton(tr("ocr_save_txt"))
         self.btn_wrap = QPushButton("")
         self.btn_wrap.setToolTip(tr("wrap_hint"))
         self.btn_rerun = QPushButton(tr("ocr_retry"))
         self.btn_close = QPushButton(tr("close"))
         btns.addWidget(self.btn_copy)
+        btns.addWidget(self.btn_copyfile)
         btns.addWidget(self.btn_save)
         btns.addWidget(self.btn_wrap)
         btns.addStretch(1)
@@ -153,6 +155,7 @@ class ResultWindow(QWidget):
 
         self._sync_wrap_button()
         self.btn_copy.clicked.connect(self.copy_text)
+        self.btn_copyfile.clicked.connect(self.copy_txt_as_file)
         self.btn_save.clicked.connect(self.save_txt)
         self.btn_wrap.clicked.connect(self.cycle_wrap)
         self.btn_rerun.clicked.connect(self.rerunRequested)
@@ -193,6 +196,7 @@ class ResultWindow(QWidget):
         self.text.setPlainText("")
         self.text.setPlaceholderText(tr("ocr_busy"))
         self.btn_copy.setEnabled(False)
+        self.btn_copyfile.setEnabled(False)
         self.btn_save.setEnabled(False)
 
     # ---------- 换行方式 ----------
@@ -244,6 +248,7 @@ class ResultWindow(QWidget):
         self.text.setPlaceholderText(tr("ocr_locating"))
         self.meta.setText(tr("ocr_locating"))
         self.btn_copy.setEnabled(False)
+        self.btn_copyfile.setEnabled(False)
         self.btn_save.setEnabled(False)
 
     def stream_found(self, total):
@@ -273,6 +278,7 @@ class ResultWindow(QWidget):
         nchars = sum(len(t) for t in texts)
         self.meta.setText(tr("ocr_lines", len(texts), nchars, elapsed))
         self.btn_copy.setEnabled(bool(texts))
+        self.btn_copyfile.setEnabled(bool(texts))
         self.btn_save.setEnabled(bool(texts))
         if not texts:
             self.text.setPlaceholderText(tr("ocr_empty"))
@@ -286,6 +292,7 @@ class ResultWindow(QWidget):
         self.text.setPlainText("")
         self.text.setPlaceholderText(tr("ocr_failed", msg))
         self.btn_copy.setEnabled(False)
+        self.btn_copyfile.setEnabled(False)
         self.btn_save.setEnabled(False)
 
     # ---------- 动作 ----------
@@ -298,6 +305,29 @@ class ResultWindow(QWidget):
 
         # 写入后回读校验（被占用时重试），成功/失败都给明确反馈
         self._pop_toast(tr("copied") if clip.set_text(t) else tr("copy_failed"))
+
+    def copy_txt_as_file(self):
+        """把识别文本复制为 TXT 文件到剪贴板（弹窗输入文件名，默认同另存默认名）。"""
+        from PyQt5.QtWidgets import QInputDialog
+
+        t = self.text.toPlainText()
+        if not t:
+            self._pop_toast(tr("ocr_empty"))
+            return
+        from . import clipboard as clip
+
+        default = tr("default_txt_filename") % time.strftime("%Y%m%d_%H%M%S")
+        text, ok = QInputDialog.getText(
+            self, tr("copy_as_file"), tr("filename_label"), text=default
+        )
+        if not ok or not text.strip():
+            return
+        path = clip.copy_text_as_file(t, text)
+        self._pop_toast(
+            tr("copied_as_file", os.path.basename(path))
+            if path
+            else tr("copy_file_failed", text.strip())
+        )
 
     def save_txt(self):
         from ..paths import pictures_dir

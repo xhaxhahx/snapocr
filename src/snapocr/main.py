@@ -143,6 +143,10 @@ def main():
         return 0
 
     si.listen()
+    # "复制为文件"的上次落盘残留清理（本会话刚写入的文件不受影响）
+    from .ui.clipboard import cleanup_clip_files
+
+    cleanup_clip_files()
     from .app import SnapApp
 
     show_tip = (not once) and "--hidden" not in args and not cfg.get("autostart_shown_tip", False)
