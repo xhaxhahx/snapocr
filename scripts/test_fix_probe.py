@@ -151,7 +151,11 @@ def main():
         apply_wrap(_L, WRAP_SENTENCE) == ["这是一个很长的句子被截图切成了两行。", "下一段开始"],
     )
     check("换行 原图：每个识别框一行", apply_wrap(_L, WRAP_ORIGINAL) == _L)
-    check("换行 空行一律丢弃", apply_wrap(["a", "", "  "], WRAP_ORIGINAL) == ["a"])
+    check(
+        "换行 原图模式原样保留(含空行缩进,§33.1 A10)",
+        apply_wrap(["a", "", "  "], WRAP_ORIGINAL) == ["a", "", "  "],
+    )
+    check("换行 格式化模式仍清洗空行", apply_wrap(["a", "", "  "], WRAP_JOIN) == ["a"])
     check(
         "换行 小数不被按句拆开",
         apply_wrap(["版本 v1.5 已发布"], WRAP_SENTENCE) == ["版本 v1.5 已发布"],
@@ -356,9 +360,9 @@ def main():
     cl2.disconnectFromServer()
     t2 = QElapsedTimer()
     t2.start()
-    while t2.elapsed() < 600 and srv2._pending is not None:
+    while t2.elapsed() < 600 and srv2._pending:
         app.processEvents()
-    check("UX-22 IPC 断开后清理挂起状态", srv2._pending is None)
+    check("UX-22 IPC 断开后清理挂起状态", not srv2._pending)
     with contextlib.suppress(Exception):
         srv2._server.close()
     _si2.KEY = _old_key2
@@ -720,6 +724,13 @@ def main():
     sd4.retheme(Theme(dark=False, accent="#0067c0"))
     check("主题 浅色下设置窗套用浅色样式", "#f3f3f3" in sd4.styleSheet())
     sd4.deleteLater()
+
+    # ---- §33 自测轮修复项（A1~A11 / C1~C3；拆分到 scripts/probes/round33_suite.py，
+    #      主文件已近 800 行上限，沿用 ux_suite 的 Ctx 注入模式）----
+    from probes.round33_suite import Ctx as _Ctx33
+    from probes.round33_suite import run as run_round33
+
+    run_round33(_Ctx33(app=app, scr=scr, cfg=cfg, check=check, skip=skip, cfg_path=tmp_cfg))
 
     print("\n== 修复项探针: PASS=%d FAIL=%d SKIP=%d ==" % (len(OK), len(FAIL), len(SKIP)))
     if SKIP:

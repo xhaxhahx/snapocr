@@ -8,6 +8,7 @@ import sys
 
 from PyQt5.QtCore import (
     QEasingCurve,
+    QPoint,
     QPointF,
     QPropertyAnimation,
     QRectF,
@@ -29,6 +30,7 @@ from PyQt5.QtGui import (
     QPolygonF,
 )
 from PyQt5.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QComboBox,
     QFontComboBox,
@@ -61,6 +63,37 @@ TEXT_SIZES = [14, 18, 24, 32]
 
 # 编辑区展开/折叠动画时长（ms）
 EXPAND_ANIM_MS = 190
+
+
+def _clamp_popup_to_screen(combo):
+    """把下拉弹出容器横向钳回所在屏幕的可用区（纵向的上下翻转 Qt 自带）。
+
+    Qt 默认把弹出列表左对齐到下拉框：列表比下拉框宽（字体名、长条目）且下拉框
+    贴近屏幕右缘时，列表会溢出到屏幕外（2026-10-26 用户实测）。
+    """
+    popup = combo.view().window()
+    g = popup.geometry()
+    scr = QApplication.screenAt(combo.mapToGlobal(QPoint(0, 0))) or QApplication.primaryScreen()
+    ag = scr.availableGeometry()
+    x = min(max(g.x(), ag.left()), ag.right() - g.width() + 1)
+    if x != g.x():
+        popup.move(x, g.y())
+
+
+class EdgeAwareComboBox(QComboBox):
+    """弹出列表靠边自适应的下拉框（工具条粗细/字号、设置页倍率/语言等共用）。"""
+
+    def showPopup(self):
+        super().showPopup()
+        _clamp_popup_to_screen(self)
+
+
+class EdgeAwareFontComboBox(QFontComboBox):
+    """字体下拉的同款靠边自适应——字体名普遍长于框宽，是最常见的溢出场景。"""
+
+    def showPopup(self):
+        super().showPopup()
+        _clamp_popup_to_screen(self)
 
 
 class EditorToolbar(QWidget):
@@ -207,21 +240,30 @@ class EditorToolbar(QWidget):
         self.btn_color.setToolTip(tr("color"))
         self.btn_color.setFixedSize(34, 34)
         self.btn_color.clicked.connect(self._open_color_popup)
-        self._set_color_chip(COLORS[0])
+        init_color = COLORS[0]
+        if parent is not None:
+            c = parent.cfg.get("pen_color")
+            if isinstance(c, str) and QColor(c).isValid():
+                # 记住上次使用的画笔颜色（pen_color 原为"只写不读"死键，
+                # 2026-10-26 按用户要求接通，跨会话生效）
+                init_color = c
+        self._set_color_chip(init_color)
         rowB.addWidget(self.btn_color)
 
-        self.width_combo = QComboBox()
+        self.width_combo = EdgeAwareComboBox()
         for w, key in WIDTHS:
             self.width_combo.addItem(tr(key), w)
+        self.width_combo.setCurrentIndex(1)  # 默认「中」(5px)，与画布初始 line_width 一致
         self.width_combo.setFixedWidth(58)
         self.width_combo.currentIndexChanged.connect(
             lambda i: self.widthChanged.emit(self.width_combo.itemData(i))
         )
         rowB.addWidget(self.width_combo)
 
-        self.size_combo = QComboBox()
+        self.size_combo = EdgeAwareComboBox()
         for s in TEXT_SIZES:
             self.size_combo.addItem("%d px" % s, s)
+        self.size_combo.setCurrentIndex(1)  # 默认 18px，与画布初始 text_size 一致
         self.size_combo.setFixedWidth(64)
         self.size_combo.currentIndexChanged.connect(
             lambda i: self.textSizeChanged.emit(self.size_combo.itemData(i))
@@ -229,7 +271,7 @@ class EditorToolbar(QWidget):
         rowB.addWidget(self.size_combo)
         self.size_combo.hide()
 
-        self.font_combo = QFontComboBox()
+        self.font_combo = EdgeAwareFontComboBox()
         self.font_combo.setFixedWidth(170)
         self.font_combo.setCurrentFont(QFont("Microsoft YaHei"))
         self.font_combo.currentFontChanged.connect(lambda f: self.fontChanged.emit(f.family()))
@@ -512,10 +554,29 @@ class ColorPickerPopup(QFrame):
         """)
 
     def popup_below(self, anchor):
+        """弹出并做靠边自适应：越右缘改与锚点右缘对齐，越下缘翻到锚点上方。
+
+        原实现直接落在锚点左下角，锚点贴屏幕右缘时弹窗（约 380px 宽）有 107px
+        溢出屏幕外（10-22 UX 报告 E-3 实测）；与工具条/放大镜的贴边翻转同策略。
+        先 show 再钳制：布局激活前的 width() 是保守值（实测 97px，show 后才是
+        真实 216px），按假宽度钳了也白钳。
+        """
         self.adjustSize()
-        gp = anchor.mapToGlobal(anchor.rect().bottomLeft())
-        self.move(gp)
         self.show()
+        gp = anchor.mapToGlobal(anchor.rect().bottomLeft())
+        scr = QApplication.screenAt(gp) or QApplication.primaryScreen()
+        ag = scr.availableGeometry()
+        x, y = gp.x(), gp.y()
+        if x + self.width() > ag.right() + 1:
+            # 越右缘：改为与锚点右缘对齐（仍越则贴屏幕左缘）
+            x = max(ag.left(), anchor.mapToGlobal(anchor.rect().topRight()).x() - self.width())
+        if y + self.height() > ag.bottom() + 1:
+            # 越下缘：翻到锚点上方（仍越则贴屏幕上缘）
+            y = max(ag.top(), gp.y() - anchor.height() - self.height())
+        # 终钳：锚点自身部分出屏等极端情况，弹窗仍完整落在屏内
+        x = max(ag.left(), min(x, ag.right() - self.width() + 1))
+        y = max(ag.top(), min(y, ag.bottom() - self.height() + 1))
+        self.move(x, y)
 
     def _pick(self, color):
         c = QColor(color) if isinstance(color, str) else color
@@ -555,7 +616,9 @@ class CanvasWidget(QWidget):
         self._px_timer.timeout.connect(self._rebuild_pixelated)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.ClickFocus)
-        self._rebuild_pixelated()
+        # 马赛克底图首建走 120ms 防抖（与 set_base 同路）：4K 选区实测同步构建
+        # 40.5ms，卡在 _finalize（松手→编辑态）关键路径上；延后一拍无感（§33.2 C2）
+        self._px_timer.start()
         self.setFixedSize(
             QSize(int(base_img.width() / self.dpr), int(base_img.height() / self.dpr))
         )
@@ -617,6 +680,7 @@ class CanvasWidget(QWidget):
             self._pixelated = small.scaled(w, h, Qt.IgnoreAspectRatio, Qt.FastTransformation)
         except Exception:
             self._pixelated = None
+        self.update()  # 防抖重建后重绘：首建/换底图后让马赛克笔画立即可见
 
     def set_tool(self, t):
         """t=None 表示未选工具（画布对鼠标透明，由遮罩处理移动）。"""
@@ -1009,9 +1073,15 @@ class CanvasWidget(QWidget):
             " border: 1px dashed %s; font-size: %dpx; padding: 2px;"
             ' font-family: "%s"; }' % (self.color, theme.current().accent_css, size, self.text_font)
         )
-        e.setFixedWidth(min(420, max(180, self.width() - int(pos_l.x()) - 8)))
-        e.setFixedHeight(int(size * 3.4))
-        e.move(int(pos_l.x()), int(pos_l.y()))
+        # 贴右/下缘时钳回画布内：输入框被裁掉就成了盲打（U2，实测曾 91% 不可见）
+        w = min(420, max(180, self.width() - int(pos_l.x()) - 8))
+        h = int(size * 3.4)
+        e.setFixedWidth(w)
+        e.setFixedHeight(h)
+        e.move(
+            min(int(pos_l.x()), max(0, self.width() - w - 4)),
+            min(int(pos_l.y()), max(0, self.height() - h - 4)),
+        )
         e.setFocus()
         e.installEventFilter(self)
         self._text_edit = e

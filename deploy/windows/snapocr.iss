@@ -31,7 +31,9 @@ Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "开机自动启动（后台托盘常驻）"; Flags: unchecked
+; 自启默认勾选（2026-10-26 用户要求）：安装页的选择是唯一事实源，
+; 未勾选时由下方 CurStepChanged 清掉旧装机残留的 Run 键
+Name: "autostart"; Description: "开机自动启动（后台托盘常驻）"
 
 [Files]
 Source: "..\..\dist\snapocr-win64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -60,6 +62,14 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 Filename: "{cmd}"; Parameters: "/C reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v SnapOCR /f"; Flags: runhidden; RunOnceId: "DelAutoStart"
 
 [Code]
+// 安装收尾：按安装页选择对齐注册表 Run 键——未勾选自启时清掉旧装机残留
+// （否则上一版写入的 Run 键继续生效，"安装时没勾但开机仍自启"）。
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and (not WizardIsTaskSelected('autostart')) then
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'SnapOCR');
+end;
+
 // 卸载前先结束常驻进程，避免文件被锁导致"Some elements could not be removed"
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var

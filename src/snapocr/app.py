@@ -75,6 +75,7 @@ class CaptureController(QObject):
         self.overlays = []
         self.result = None
         self.worker = None
+        self._stale_ocr = False  # 选区已移动：在途识别结果作废（U3）
         self._hiding = []
 
     # ---------- 截屏 ----------
@@ -222,9 +223,12 @@ class CaptureController(QObject):
         screen = screen or QApplication.primaryScreen()
         self._last_input = img
         if self.worker is not None:
-            # ok/fail 派发完才置 None，比 isRunning() 语义更准（避免刚出结果时状态闪旧值）
-            self.app.toast.pop(tr("ocr_running"), screen)
-            return
+            if not self._stale_ocr:
+                self.app.toast.pop(tr("ocr_running"), screen)
+                return
+            # 选区已移动：旧任务结果作废——切断其 UI 信号后放行新任务（U3），
+            # 旧线程自行跑完自然回收（finished→deleteLater 保留），结果不再挡道
+            self._detach_worker(self.worker)
         created = False
         if self.result is None:
             created = True
@@ -268,10 +272,20 @@ class CaptureController(QObject):
         if self.result is not None:
             self.result.stream_line(text, done, total)
 
+    def _detach_worker(self, w):
+        """丢弃在途识别任务：断开其全部 UI 信号（finished→deleteLater 保留，线程自然收尾）。"""
+        with contextlib.suppress(TypeError, RuntimeError):
+            w.ok.disconnect(self._ocr_ok)
+            w.fail.disconnect(self._ocr_fail)
+            w.loaded.disconnect(self._ocr_loaded)
+            w.found.disconnect(self._ocr_found)
+            w.partial.disconnect(self._ocr_partial)
+
     def _ocr_ok(self, results, elapsed):
         if self.result:
             self.result.set_results(results, elapsed)
         self.worker = None
+        self._stale_ocr = False
         self.ocrBusy.emit(False)
         self._maybe_release_engine()
 
@@ -279,6 +293,7 @@ class CaptureController(QObject):
         if self.result:
             self.result.set_error(msg)
         self.worker = None
+        self._stale_ocr = False
         self.ocrBusy.emit(False)
         self._maybe_release_engine()
 
@@ -299,11 +314,14 @@ class CaptureController(QObject):
 
     def _on_selection_moved(self):
         """移动选区 = 重新取景，结果窗直接关闭（按钮状态同步）。"""
+        self._stale_ocr = True  # 在途识别针对的是旧取景，结果作废（U3）
         if self.result is not None:
             self.result.close()  # 触发 _result_closed → ocrPanel(False)
 
     def _result_closed(self):
         self.result = None
+        # 结果窗已关，「重新识别」不可达：释放上次识别的输入图（4K 约 24-32MB）（§33.1 A7）
+        self._last_input = None
         self.ocrPanel.emit(False)
         self._maybe_quit_once()
 
@@ -315,6 +333,11 @@ class SnapApp(QObject):
         super().__init__()
         self.once = bool(once)  # 用完即走模式（--once / 单文件版默认）
         self.cfg = Config()
+        # 自启以系统实际状态为准（注册表/桌面项）：安装器按安装页选择改写注册表后，
+        # 设置页与之同步（旧装机残留曾致"安装未勾选但设置显示已开启"）
+        from .platform.autostart import sync_autostart_cfg
+
+        sync_autostart_cfg(self.cfg)
         self.toast = ToastLabel()
         self.controller = CaptureController(self)
 
@@ -354,11 +377,21 @@ class SnapApp(QObject):
                 ),
             )
 
-        # 屏幕热插拔/休眠唤醒：有活动遮罩会话时重建，避免界面停在旧拓扑上
-        self._screen_rebuild = False
+        # 屏幕热插拔/休眠唤醒/分辨率热变更：有活动遮罩会话时重建，
+        # 避免界面停在旧拓扑或旧几何上（§33.1 A8：同屏改分辨率不触发增删信号）。
+        # 重建走"500ms 静默期"：连续变化只在几何稳定后重抓一次——在变化中途重抓会
+        # 拿到显示管线过渡期的半成品帧（上缘残条+其余纯黑）。RDP 会话对几何变化
+        # 直接忽略（见 _on_screens_changed，2026-10-26 RDP 实测反馈）
+        self._rebuild_timer = QTimer(self)
+        self._rebuild_timer.setSingleShot(True)
+        self._rebuild_timer.setInterval(500)
+        self._rebuild_timer.timeout.connect(self._rebuild_overlays)
         try:
-            QGuiApplication.instance().screenAdded.connect(self._on_screens_changed)
-            QGuiApplication.instance().screenRemoved.connect(self._on_screens_changed)
+            qapp = QGuiApplication.instance()
+            qapp.screenAdded.connect(self._on_screen_added)
+            qapp.screenRemoved.connect(self._on_screens_changed)
+            for _scr in qapp.screens():
+                _scr.geometryChanged.connect(self._on_screens_changed)
         except Exception:
             # 旧 Qt / 无屏幕后端时可能无此信号：跳过即可
             pass
@@ -430,15 +463,30 @@ class SnapApp(QObject):
                 pass
 
     def _on_screens_changed(self, *_):
-        """屏幕拓扑变化：仅在有活动遮罩会话时重建（带防抖，避免信号风暴）。"""
-        if not self.controller.overlays or self._screen_rebuild:
+        """屏幕拓扑/几何变化：有活动遮罩时等 500ms 静默期再重建一次（定时器自重置防风暴）。
+
+        RDP 例外（2026-10-26 实测反馈）：RDP 客户端会随全屏遮罩的出现动态协商
+        分辨率，geometryChanged 频发；此时重建后的重抓落在显示管线过渡期，得到
+        "上缘残条+其余纯黑"的半成品帧，整个遮罩表现为黑屏。RDP 会话忽略几何
+        变化（维持既有抓屏即可），只对屏幕增删（真拓扑变化）重建。
+        """
+        if not self.controller.overlays:
             return
-        self._screen_rebuild = True
-        log.info("屏幕数量变化：重建截屏遮罩")
-        QTimer.singleShot(250, self._rebuild_overlays)
+        if is_remote_session():
+            return
+        self._rebuild_timer.start()
+
+    def _on_screen_added(self, scr):
+        """新屏接入：补挂它的 geometryChanged（分辨率/缩放热变更），再走既有静默期重建。"""
+        with contextlib.suppress(Exception):
+            scr.geometryChanged.connect(self._on_screens_changed)
+        self._on_screens_changed()
 
     def _rebuild_overlays(self):
-        self._screen_rebuild = False
+        """几何已稳定：关掉旧遮罩并重新取景（150ms 让位窗口收尾）。"""
+        if not self.controller.overlays:
+            return
+        log.info("屏幕拓扑/几何变化已稳定：重建截屏遮罩")
         self.controller._close_overlays()
         QTimer.singleShot(150, self.start_capture)
 
@@ -455,6 +503,10 @@ class SnapApp(QObject):
             self._settings.raise_()
             return
         s = SettingsDialog(self.cfg)
+        if self.controller.overlays:
+            # 截屏会话进行中经 IPC/快捷方式打开：置顶遮罩会盖住普通窗口，
+            # 设置窗须临时置顶才可见可交互（U10）；会话结束后照常平铺
+            s.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         s.settingsApplied.connect(self._settings_applied)
         self._settings = s
         s.show()

@@ -404,10 +404,10 @@ def run(ctx):
         _wd.descend_rect_at = _orig_descend
     check("UX-21 副屏窗口识别坐标不重复叠加", _seen.get("phys") == (2020.0, 100.0))
 
-    # 4) 用户可见文案走 i18n：档位名与语言下拉首项
+    # 4) 用户可见文案走 i18n：档位名与语言下拉首项（U7：默认项=跟随系统，不再提 Chinese）
     _i18n.init_lang("en")
     check("UX-21 线宽档位键英文", _i18n.tr("width_thin") == "Thin")
-    check("UX-21 语言下拉首项英文", _i18n.tr("lang_default").startswith("Chinese"))
+    check("UX-21 语言下拉首项英文", _i18n.tr("lang_default") == "Follow system")
     _tb_i = EditorToolbar()
     check("UX-21 工具条档位显示英文", _tb_i.width_combo.itemText(0) == "Thin")
     _tb_i.deleteLater()

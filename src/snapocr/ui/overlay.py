@@ -105,8 +105,15 @@ class OverlayWindow(QWidget):
         self._snap_target = None  # 边缘吸附目标（窗口/控件矩形）
         self._last_snap_t = 0.0
         self._mag_rect = None  # 放大镜当前脏矩形（只重绘小窗，4K 下省整屏重绘）
-        self._mag_cache = None  # 放大镜缩放图缓存
-        self._mag_key = None
+        self._mag_label = None  # 编辑态手柄缩放时的置顶放大镜标签（U6，懒创建）
+        # 选区移动/缩放按帧合并（§33.2 C3）：高轮询鼠标（125~1000Hz）下每个
+        # move 事件全链重算（整图 copy + 全笔画重建，实测约 10ms/事件）会打满
+        # 单核；同一帧只执行最后一次位置
+        self._move_coalesce = QTimer(self)
+        self._move_coalesce.setSingleShot(True)
+        self._move_coalesce.setInterval(16)
+        self._move_coalesce.timeout.connect(self._apply_pending_move)
+        self._pending_move_pos = None
 
         self._hint_font = QFont()
         self._hint_font.setPixelSize(12)
@@ -173,7 +180,6 @@ class OverlayWindow(QWidget):
 
     def release_buffers(self):
         """会话结束立即释放抓屏缓冲（4K 双屏可达数百 MB 瞬态占用）。"""
-        self._mag_cache = None
         self._mag_rect = None
         self.pm = QPixmap()
         self.img = QImage()
@@ -222,6 +228,12 @@ class OverlayWindow(QWidget):
         self.canvas = CanvasWidget(
             img, self.dpr, mosaic_block=int(self.cfg.get("mosaic_block", 10)), parent=self
         )
+        # 重新框选后新画布沿用工具条当前的颜色/粗细/字号/字体：工具条是会话内的
+        # 状态持有者（画布随 teardown 销毁重建，曾回默认红/中档，与色片显示不一致）
+        self.canvas.color = self.toolbar.btn_color._hex
+        self.canvas.line_width = self.toolbar.width_combo.currentData() or 5
+        self.canvas.text_size = self.toolbar.size_combo.currentData() or 18
+        self.canvas.text_font = self.toolbar.font_combo.currentFont().family()
         self.canvas.setGeometry(self._content_rect().toRect())
         self.canvas.show()
         self.canvas.stackChanged.connect(self.toolbar.set_undo_redo_enabled)
@@ -403,8 +415,10 @@ class OverlayWindow(QWidget):
             by = pos.y() - 18 - box
         return QRectF(bx, by, box, box)
 
-    def _update_magnifier_dirty(self, new_pos):
+    def _update_magnifier_dirty(self, new_pos, extra=None):
         """只重绘放大镜小窗（旧框∪新框），避免 4K 下每次移动整屏重绘。
+
+        extra：额外需要一并重绘的区域（如悬停高亮环变化，R3），与放大镜旧新框取并集。
 
         两条硬约束（均来自 2026-10-21 客户机实测 + 本地 QT_SCALE_FACTOR=1.25 复现）：
 
@@ -422,47 +436,49 @@ class OverlayWindow(QWidget):
         old = self._mag_rect
         new = self._magnifier_rect(new_pos)
         self._mag_rect = new
-        if old is None and new is None:
+        if old is None and new is None and extra is None:
             return
         if old is None or new is None or abs(new.x() - old.x()) > 40 or abs(new.y() - old.y()) > 40:
             # 首帧 / 指针越界 / 翻转跳变：全量重绘，不做局部脏区
             self._update_all()
             return
-        r = old.united(new)
+        r = old.united(new) if (old is not None and new is not None) else (new or old)
+        if extra is not None:
+            r = r.united(extra)
         self.update(r.toAlignedRect().adjusted(-8, -8, 8, 8))
 
-    def _draw_magnifier(self, p, pos):
-        zoom = MAG_ZOOM
+    def _magnifier_tile(self, pos):
+        """放大镜取景 tile（源区裁剪+放大）；指针越界源区为空时返回 None。
+
+        历史注记：曾有"源区不变时复用缩放图"的缓存，但 key 含光标锚定的
+        src.x/y——移动时每帧必变、200 帧仅命中 1 次（R4 实测），纯开销已删；
+        copy+scale 本身实测仅 0.016ms。IgnoreAspectRatio（非等比扩展）：
+        指针贴屏幕边缘时 src 被裁成非正方形，等比扩展会产出超出目标框的
+        tile、超出脏区的部分永久残留（客户机"贴边缘出竖线"的根因）；
+        放大镜语义就是把 src 拉伸填满方框，各向异性拉伸才是正确行为。
+        """
         box = MAG_BOX
-        half_dev = int(box / (2 * zoom) * self.dpr)
+        half_dev = int(box / (2 * MAG_ZOOM) * self.dpr)
         c = QPointF(pos.x() * self.dpr, pos.y() * self.dpr)
         src = self.img.rect().intersected(
             QRectF(c.x() - half_dev, c.y() - half_dev, half_dev * 2, half_dev * 2).toAlignedRect()
         )
         if src.isEmpty():
+            return None
+        tile = self.img.copy(src).scaled(
+            int(box * self.dpr), int(box * self.dpr), Qt.IgnoreAspectRatio, Qt.FastTransformation
+        )
+        tile.setDevicePixelRatio(self.dpr)
+        return tile
+
+    def _draw_magnifier(self, p, pos):
+        box = MAG_BOX
+        tile = self._magnifier_tile(pos)
+        if tile is None:
             # 越界（指针暂离图像）：本次不画，但**不**清 _mag_rect —— 若上一帧画过
             # 放大镜，保留旧框才能在下次移动时以 old∪new 正确清除，否则旧 tile 会永久
             # 留在 backing store 里，被主题切换的全窗口重贴一次性贴出（残影）。
             return
-        # 源区不变时复用上一帧的缩放图，避免每帧 copy+scale
-        key = (src.x(), src.y(), src.width(), src.height())
-        if self._mag_cache is None or self._mag_key != key:
-            # IgnoreAspectRatio（非 KeepAspectRatioByExpanding）：指针贴屏幕边缘时
-            # src 被 img.rect() 裁成非正方形（如 15×30），等比扩展会产出超出目标的
-            # tile（150×300），drawImage 随之画出比放大镜框大一倍的区域，超出脏区的
-            # 部分永久残留在 backing store —— 客户机报告"贴边缘滑动出竖线"的根因。
-            # 放大镜语义就是把 src 区域拉伸填满方框，各向异性拉伸才是正确行为
-            # （src 为正方形时两种模式等价，故此前未暴露）。
-            tile = self.img.copy(src).scaled(
-                int(box * self.dpr),
-                int(box * self.dpr),
-                Qt.IgnoreAspectRatio,
-                Qt.FastTransformation,
-            )
-            tile.setDevicePixelRatio(self.dpr)
-            self._mag_cache = tile
-            self._mag_key = key
-        tile = self._mag_cache
         r = self._magnifier_rect(pos)
         self._mag_rect = r
         bx, by = r.left(), r.top()
@@ -482,6 +498,7 @@ class OverlayWindow(QWidget):
             self.canvas.hide()
             self.canvas.deleteLater()
             self.canvas = None
+        self._hide_resize_magnifier()
         self.toolbar.hide()
         if self._preview is not None and self._preview.isVisible():
             self._preview.close()
@@ -510,10 +527,16 @@ class OverlayWindow(QWidget):
         return r.intersected(QRectF(self.rect()))
 
     def _detect_window(self, pos):
-        """悬停高亮用：带 120ms 节流（节流内直接返回上一次结果）。"""
+        """悬停高亮用：带 250ms 节流（节流内直接返回上一次结果）。
+
+        250ms（R2，原 120ms）：探测在 UI 线程同步跑 EnumWindows+DWM 下钻，
+        本机中位 0.38ms、RDP/集显环境下可达数毫秒——节流越松，规律性顿挫越少；
+        高亮框本身是粗粒度提示，4Hz 跟随足够。吸附探测（_snap_target_at）
+        保持 120ms 不放：缩放交互期间贴边即时性更敏感。
+        """
 
         now = time.monotonic()
-        if now - self._last_detect_t < 0.12:
+        if now - self._last_detect_t < 0.25:
             return self.hover_rect
         self._last_detect_t = now
         return self._compute_window_rect(pos)
@@ -549,7 +572,6 @@ class OverlayWindow(QWidget):
             elif self.sel.contains(pos):
                 self.drag_mode = "move"
                 self.move_offset = QPointF(self.sel.topLeft()) - QPointF(pos)
-                self.selectionMoved.emit()  # 移动选区 → 联动关闭结果窗
             else:
                 # 选区外左键拖动 = 重新框选（关闭画布，回到框选阶段替换旧选区）
                 self._teardown_canvas()
@@ -572,18 +594,15 @@ class OverlayWindow(QWidget):
         pos = ev.pos()
         self._mouse_pos = QPointF(pos)
         if self.dragging:
+            old_sel = self.sel
             self.sel = QRectF(self.drag_start, QPointF(pos)).normalized()
-            self._update_all()
+            self._update_drag_dirty(old_sel, self.sel)
             return
         if self.finalized:
-            if self.drag_mode == "move":
-                nl = QPointF(pos) + self.move_offset
-                w, h = self.sel.width(), self.sel.height()
-                x = max(0.0, min(nl.x(), self.width() - w))
-                y = max(0.0, min(nl.y(), self.height() - h))
-                self._move_sel_to(QPointF(x, y))
-            elif self.drag_mode == "resize":
-                self._resize(pos)
+            if self.drag_mode in ("move", "resize"):
+                # 帧合并：只记最后一次位置，16ms 定时器到点统一执行（释放时同步补执行）
+                self._pending_move_pos = QPointF(pos)
+                self._move_coalesce.start()
             else:
                 self._update_cursor(QPointF(pos))
             return
@@ -591,8 +610,16 @@ class OverlayWindow(QWidget):
         if self.canvas is None:
             h = self._detect_window(pos)
             if h != self.hover_rect:
+                # 高亮框变化：只重绘旧∪新高亮环（含外沿，R3），不再整屏
+                old_h = self.hover_rect
                 self.hover_rect = h
-                self._update_all()  # 高亮框变化：整屏重绘一次
+                extra = None
+                m = self.BORDER_W * 2  # 高亮环宽 2px 的外沿余量
+                for r in (old_h, h):
+                    if r is not None:
+                        rr = r.adjusted(-m, -m, m, m)
+                        extra = rr if extra is None else extra.united(rr)
+                self._update_magnifier_dirty(QPointF(pos), extra=extra)
             else:
                 self._update_magnifier_dirty(QPointF(pos))  # 否则只重绘放大镜小窗
 
@@ -620,11 +647,52 @@ class OverlayWindow(QWidget):
                 best, best_d = e, d
         return best
 
+    def _update_drag_dirty(self, old_sel, new_sel):
+        """拖动框选的脏区重绘（R1）：新旧选区并集（含边框环与尺寸标签外沿）∪ 放大镜旧新框。
+
+        原实现每个 move 事件整屏重绘（P23 只优化了 idle 悬停路径）；4K/多屏
+        RDP 软件光栅下整屏成本按 10~20 倍放大即掉帧。选区从同一角点拖出时
+        新旧基本包含，并集近似就是选区本身，脏区从整屏缩到选区量级。
+        """
+        m_old = self._mag_rect
+        m_new = self._magnifier_rect(self._mouse_pos)
+        self._mag_rect = m_new
+        dirty = None
+        for r in (old_sel, new_sel):
+            if r is not None and not r.isNull():
+                # -24 逻辑余量：覆盖 2px 边框环、选区上方 h+6 的尺寸标签与 dpr 取整
+                rr = r.adjusted(-24, -24, 24, 24)
+                dirty = rr if dirty is None else dirty.united(rr)
+        for r in (m_old, m_new):
+            if r is not None:
+                dirty = r if dirty is None else dirty.united(r)
+        if dirty is None:
+            self._update_all()
+            return
+        self.update(dirty.toAlignedRect().adjusted(-8, -8, 8, 8))
+
+    def _apply_pending_move(self):
+        """执行被合并到本帧的最后一次移动/缩放位置（释放时也同步补执行）。"""
+        pos, self._pending_move_pos = self._pending_move_pos, None
+        if pos is None or not self.finalized or self.drag_mode not in ("move", "resize"):
+            return
+        if self.drag_mode == "move":
+            nl = QPointF(pos) + self.move_offset
+            w, h = self.sel.width(), self.sel.height()
+            x = max(0.0, min(nl.x(), self.width() - w))
+            y = max(0.0, min(nl.y(), self.height() - h))
+            self._move_sel_to(QPointF(x, y))
+        else:
+            self._resize(pos)
+
     def _move_sel_to(self, new_tl):
         target = self._snap_target_at(self._mouse_pos)
         if target is not None:
             new_tl = self._snap_translate(new_tl, target)
         delta = QPointF(new_tl.x() - self.sel.left(), new_tl.y() - self.sel.top())
+        if abs(delta.x()) < 0.01 and abs(delta.y()) < 0.01:
+            return  # 吸附把位置钉回原处：无实际位移，不当作"移动选区"
+        self.selectionMoved.emit()  # 真实位移发生 → 联动关闭结果窗（§33.1 A9）
         self.sel.moveTopLeft(new_tl)
         if self.canvas is not None:
             # 取景框语义：框移到哪，内容就取屏幕冻结图的哪块（笔画锚定屏幕位置）
@@ -660,6 +728,37 @@ class OverlayWindow(QWidget):
             self.canvas.shift_strokes(-delta.x() * self.dpr, -delta.y() * self.dpr)
         self._reposition_toolbar()
         self._update_all()
+        self._update_resize_magnifier()  # U6：手柄缩放期间跟随的像素级放大镜
+
+    def _update_resize_magnifier(self):
+        """编辑态手柄缩放时的放大镜（U6）。
+
+        遮罩父绘层会被画布子控件盖住（children 恒在 parent 之上），故这里用
+        懒创建的置顶 QLabel 承载；仅缩放手势期间可见——这是最需要像素级
+        对齐的时刻（框选阶段的父绘放大镜不受影响）。
+        """
+        if self._mouse_pos is None:
+            return
+        r = self._magnifier_rect(self._mouse_pos)
+        tile = self._magnifier_tile(self._mouse_pos)
+        if r is None or tile is None:
+            self._hide_resize_magnifier()
+            return
+        if self._mag_label is None:
+            self._mag_label = QLabel(self)
+            self._mag_label.setObjectName("magLabel")
+            self._mag_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self._mag_label.setStyleSheet(
+                "#magLabel { border: 1px solid #ffffff; background: transparent; }"
+            )
+        self._mag_label.setPixmap(QPixmap.fromImage(tile))
+        self._mag_label.setGeometry(r.toRect())
+        self._mag_label.raise_()  # 画布重建后仍在画布之上
+        self._mag_label.show()
+
+    def _hide_resize_magnifier(self):
+        if self._mag_label is not None:
+            self._mag_label.hide()
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.RightButton:
@@ -686,8 +785,16 @@ class OverlayWindow(QWidget):
             self._finalize()
             return
         if self.finalized and self.drag_mode:
+            was_resize = self.drag_mode == "resize"
+            if self._pending_move_pos is not None:  # 释放即定格：合并中的最后位置立即生效
+                self._move_coalesce.stop()
+                self._apply_pending_move()
             self.drag_mode = None
             self._update_cursor(QPointF(ev.pos()))
+            if was_resize:
+                # 缩放结束：收掉跟随的放大镜标签并重绘一次清痕迹
+                self._hide_resize_magnifier()
+                self._update_all()
 
     def mouseDoubleClickEvent(self, ev):
         # 双击选区 = 复制并结束（常见习惯）
@@ -788,7 +895,9 @@ class OverlayWindow(QWidget):
 
     def _ocr(self):
         self.canvas._commit_pending_text()
-        self.ocrRequested.emit(self.crop_image(), self.global_rect(), self.screen)
+        # 所见即所得（U1）：OCR 读含标注的合成图——马赛克遮住的内容不再被
+        # "绕过识别"（隐私直觉陷阱）；无标注时 composite 与原始裁剪像素一致
+        self.ocrRequested.emit(self.composite(), self.global_rect(), self.screen)
 
     def _done(self):
         """完成 → 预览确认窗（复制/另存/重试），借鉴 Firefox 预览流。"""

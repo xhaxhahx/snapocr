@@ -26,7 +26,9 @@ class SingleInstance(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._server = None
-        self._buf = b""
+        # sock -> bytes：并发连接各自独立缓冲。单槽位会在双连接毫秒级窗口内
+        # 被后者覆盖，先到客户端的命令被静默丢弃（§33.1 A11）
+        self._pending = {}
 
     def try_connect(self, args) -> str:
         """已有实例在跑则转发命令，返回 FORWARDED / NO_INSTANCE / UNCERTAIN。
@@ -62,34 +64,27 @@ class SingleInstance(QObject):
         sock = self._server.nextPendingConnection()
         if sock is None:
             return
-        self._pending = sock
-        self._buf = b""  # 累积缓冲：QLocalSocket 不保证一次 readyRead 收完整报文
-        # 数据可能随连接一起到达，先试读一次；其余交给 readyRead
-        self._try_read()
+        self._pending[sock] = b""
         with contextlib.suppress(Exception):
-            sock.readyRead.connect(self._try_read)
-            # 客户端异常断开（超时/被杀/发半截报文后退出）时清理状态：否则 _pending
-            # 会指向已死 socket，直到下一次连接才被覆盖（第二轮审计 P2-06）。
-            sock.disconnected.connect(self._on_disconnect)
+            sock.readyRead.connect(lambda s=sock: self._try_read(s))
+            # 客户端异常断开（超时/被杀/发半截报文后退出）时清理其缓冲，防累积
+            sock.disconnected.connect(lambda s=sock: self._on_disconnect(s))
+        # 数据可能随连接一起到达，先试读一次；其余交给 readyRead
+        self._try_read(sock)
 
-    def _on_disconnect(self):
-        """连接断开时释放缓冲状态（主动断开路径已先置 None，不会误清）。"""
-        sock = getattr(self, "_pending", None)
-        if sock is not None and sock.state() != QLocalSocket.ConnectedState:
-            self._pending = None
-            self._buf = b""
+    def _on_disconnect(self, sock):
+        self._pending.pop(sock, None)
 
-    def _try_read(self):
-        sock = getattr(self, "_pending", None)
-        if sock is None:
+    def _try_read(self, sock):
+        buf = self._pending.get(sock)
+        if buf is None:
             return
         chunk = bytes(sock.readAll())
         if not chunk:
             return  # 数据未到齐，等 readyRead 再试
-        buf = getattr(self, "_buf", b"") + chunk
+        buf += chunk
         if len(buf) > 64 * 1024:  # 安全上限：命令行转发不可能这么大
-            self._pending = None
-            self._buf = b""
+            self._pending.pop(sock, None)
             with contextlib.suppress(Exception):
                 sock.disconnectFromServer()
             return
@@ -98,10 +93,9 @@ class SingleInstance(QObject):
         try:
             args = json.loads(buf.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
-            self._buf = buf  # 尚未收全，等下一次 readyRead
+            self._pending[sock] = buf  # 尚未收全，等下一次 readyRead
             return
-        self._buf = b""
-        self._pending = None
+        self._pending.pop(sock, None)
         with contextlib.suppress(Exception):
             sock.write(b"ok")
             sock.flush()

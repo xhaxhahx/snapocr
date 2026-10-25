@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Windows 全局热键：RegisterHotKey + 原生事件过滤器。"""
 
+import contextlib
 import ctypes
 import ctypes.wintypes as wt
 
@@ -95,6 +96,14 @@ class HotkeyManager(QObject):
             self.error.emit("不支持的按键: " + ks)
             return False
         if not ctypes.windll.user32.RegisterHotKey(None, HOTKEY_ID, m | MOD_NOREPEAT, vk):
+            # 改键失败回滚：register 首行已注销旧热键，不回滚则本会话热键彻底失效
+            # （实测失败后旧组合可被外部进程立刻抢注，§33.1 A5）。
+            # Linux 侧因 P2-07（X11 线程阻塞在 XNextEvent）无法等价回滚，维持既有语义。
+            prev = self._current
+            if prev:
+                self._current = ""  # 置空防递归回滚
+                with contextlib.suppress(Exception):
+                    self.register(prev)
             self.error.emit("RegisterHotKey 失败: " + ks)
             return False
         self._filter = WinHotkeyFilter(lambda: self.activated.emit())

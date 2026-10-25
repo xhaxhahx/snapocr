@@ -76,6 +76,15 @@ def run_selftest(app, cfg):
         _, e2 = E.recognize_sync(cfg, bgr)
         print("  二次识别 %.2fs" % e2)
         _assert(e2 < 5.0, "二次识别耗时可接受", results)
+        # 空白图：stream 路径须与 sync 一致按"空结果"返回，不得把上游
+        # "result is empty" 异常当失败直出（2026-10-23 回归轮实证的差异）
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QImage
+
+        blank = QImage(400, 100, QImage.Format_RGB888)
+        blank.fill(Qt.white)
+        res_blank, _ = E.recognize_stream(cfg, E.qimage_to_bgr(blank))
+        _assert(res_blank == [], "空白图识别返回空结果(非失败)", results)
     except Exception as e:
         _assert(False, "OCR 引擎: %s" % e, results)
 
@@ -111,6 +120,8 @@ def run_selftest(app, cfg):
     }
     c.mouseReleaseEvent(QEvent(QEvent.MouseButtonRelease))
     c.set_tool(TOOL_MOSAIC)
+    c._px_timer.stop()  # C2 首建已改防抖：自检同步构建马赛克底图，保证渲染断言确定性
+    c._rebuild_pixelated()
     from PyQt5.QtGui import QPainterPath
 
     path = QPainterPath()

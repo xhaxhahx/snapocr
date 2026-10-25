@@ -255,7 +255,15 @@ def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None):
         crops, det_res = eng.detect_and_crop(bgr, op_record)
         if getattr(eng, "use_cls", False):
             crops, _cls_res = eng.cls_and_rotate(crops)
-    except Exception as e:  # 检测/分类失败：与 sync 路径一样按错误上抛
+    except Exception as e:
+        if "result is empty" in str(e):
+            # 空白/零检出图：上游 detect_and_crop 抛异常，而 __call__（sync 路径）对同一
+            # 输入返回空结果。两条路径对齐：按"未识别到文字"返回，不把上游英文异常
+            # 文案当失败直出给用户（2026-10-23 回归轮实证）。消息匹配属上游私有口径
+            # （宪法 §4.6），升级 rapidocr 时须复核。
+            if on_found is not None:
+                on_found(0)
+            return [], time.perf_counter() - t0
         raise OcrError(str(e)) from e
 
     boxes = getattr(det_res, "boxes", None)

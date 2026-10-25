@@ -78,11 +78,15 @@ def _split_sentences(text):
 
 
 def apply_wrap(lines, mode):
-    """按换行方式把识别行重排为展示行。空行一律丢弃。"""
+    """按换行方式把识别行重排为展示行。
+
+    「原图换行」逐行原样保留（含缩进与空行）——docs/03 §5 的定位就是
+    "完整保留截图原本的排版（代码、表格用这个）"；清洗（strip/丢空行）
+    只服务于另两种"格式化"模式（§33.1 A10）。"""
+    if mode == WRAP_ORIGINAL:
+        return [str(x) for x in lines]
     raw = [str(x).strip() for x in lines]
     raw = [s for s in raw if s]
-    if mode == WRAP_ORIGINAL:
-        return raw
     text = _join_all(raw)
     if not text:
         return []
@@ -275,6 +279,9 @@ class ResultWindow(QWidget):
 
     def set_error(self, msg):
         self._results = []
+        # 失败终态必须清流式缓存：否则 _raw_lines 仍取到半截行，
+        # 点「格式化换行」会冒出残缺文字（§33.1 A3）
+        self._stream_lines = []
         self.meta.setText("")
         self.text.setPlainText("")
         self.text.setPlaceholderText(tr("ocr_failed", msg))
@@ -300,12 +307,16 @@ class ResultWindow(QWidget):
             default_dir = self.cfg.get("save_dir") or ""
         if not default_dir:
             default_dir = pictures_dir()
-        default = os.path.join(default_dir, "OCR_%s.txt" % time.strftime("%Y%m%d_%H%M%S"))
+        default = os.path.join(
+            default_dir, tr("default_txt_filename") % time.strftime("%Y%m%d_%H%M%S")
+        )
         path, _ = QFileDialog.getSaveFileName(self, tr("ocr_save_txt"), default, "Text (*.txt)")
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            # utf-8-sig（U4）：Win10 1903 前的记事本（含 LTSC 2019/1809）不嗅探
+            # 无 BOM 的 UTF-8，中文按 ANSI/GBK 打开会乱码；logger 同口径
+            with open(path, "w", encoding="utf-8-sig") as f:
                 f.write(self.text.toPlainText())
             if self.cfg is not None:
                 self.cfg.set("save_dir", os.path.dirname(path))
@@ -337,8 +348,16 @@ class ResultWindow(QWidget):
     def show_near(self, anchor_rect, screen):
         """在锚点矩形（全局逻辑坐标）右侧显示，放不下则屏幕居中。"""
         self.adjustSize()
-        g = self.frameGeometry()
+        # 记忆上次关闭时的窗口尺寸（U8）：adjustSize 会回到 sizeHint，须在其后回填
+        if self.cfg is not None:
+            w = int(self.cfg.get("result_win_w", 0) or 0)
+            h = int(self.cfg.get("result_win_h", 0) or 0)
+            if w >= 240 and h >= 200:
+                self.resize(w, h)
         sr = screen.availableGeometry()
+        if self.width() > sr.width() or self.height() > sr.height():
+            self.resize(min(self.width(), sr.width()), min(self.height(), sr.height()))  # 不超屏
+        g = self.frameGeometry()
         x = int(anchor_rect.right()) + 16
         y = int(anchor_rect.top())
         if x + g.width() > sr.right():
@@ -352,5 +371,9 @@ class ResultWindow(QWidget):
         self.activateWindow()
 
     def closeEvent(self, ev):
+        if self.cfg is not None:
+            # 记住用户拉到的尺寸（U8），下次识别回填
+            self.cfg.set("result_win_w", self.width())
+            self.cfg.set("result_win_h", self.height())
         self.closed.emit()
         super().closeEvent(ev)

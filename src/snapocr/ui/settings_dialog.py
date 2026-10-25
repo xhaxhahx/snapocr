@@ -7,7 +7,6 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -23,6 +22,7 @@ from PyQt5.QtWidgets import (
 from ..config import DEFAULTS
 from ..i18n import tr
 from . import theme
+from .editor import EdgeAwareComboBox
 
 _MOD_KEYS = {
     Qt.Key_Control,
@@ -56,6 +56,13 @@ class HotkeyEdit(QLineEdit):
             return
         if k == Qt.Key_Backspace and m == Qt.NoModifier:
             self.clear()
+            return
+        if not (
+            m & (int(Qt.ControlModifier) | int(Qt.AltModifier) | int(Qt.MetaModifier))
+        ) and not (Qt.Key_F1 <= k <= Qt.Key_F24):
+            # 无修饰键的单键（如 A）会被 RegisterHotKey/XGrabKey 接受，注册后
+            # 全系统按该键即触发截屏、打字被打断，录入阶段直接拒绝（§33.1 A6）；
+            # F1-F24 单键不受限。修饰键状态不吞，保持"半成品"显示。
             return
         seq = QKeySequence(k | m)
         txt = seq.toString(QKeySequence.PortableText)
@@ -100,7 +107,7 @@ class SettingsDialog(QWidget):
         f2.addRow(self.cls_cb)
         self.release_cb = QCheckBox(tr("release_after_ocr"))
         f2.addRow(self.release_cb)
-        self.scale_combo = QComboBox()
+        self.scale_combo = EdgeAwareComboBox()
         for v, n in [(1.0, "×1.0"), (1.5, "×1.5"), (2.0, "×2.0")]:
             self.scale_combo.addItem(n, v)
         f2.addRow(tr("small_scale"), self.scale_combo)
@@ -123,7 +130,7 @@ class SettingsDialog(QWidget):
         self.mosaic_spin = QSpinBox()
         self.mosaic_spin.setRange(6, 40)
         f3.addRow(tr("mosaic_block"), self.mosaic_spin)
-        self.lang_combo = QComboBox()
+        self.lang_combo = EdgeAwareComboBox()
         self.lang_combo.addItem(tr("lang_default"), "")
         self.lang_combo.addItem("中文", "zh")
         self.lang_combo.addItem("English", "en")
