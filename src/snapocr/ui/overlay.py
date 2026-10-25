@@ -20,6 +20,7 @@ from ..i18n import tr
 from ..platform import windowdetect
 from . import clipboard as clip
 from . import theme
+from .clipboard import ask_filename as _ask_filename
 from .editor import TOOL_SELECT, CanvasWidget, EditorToolbar
 from .preview_dialog import PreviewDialog
 
@@ -873,13 +874,8 @@ class OverlayWindow(QWidget):
 
     def _copy_as_file(self):
         """把标注图复制为 JPG 文件到剪贴板（弹窗输入文件名，默认同保存默认名）。"""
-        from PyQt5.QtWidgets import QInputDialog
-
-        default = tr("default_filename_jpg") % time.strftime("%Y%m%d_%H%M%S")
-        text, ok = QInputDialog.getText(
-            self, tr("copy_as_file"), tr("filename_label"), text=default
-        )
-        if not ok or not text.strip():
+        text = _ask_filename(self, tr("default_filename_jpg"))
+        if text is None:
             return
         self.canvas._commit_pending_text()
         path = clip.copy_image_as_file(self.composite(), text)

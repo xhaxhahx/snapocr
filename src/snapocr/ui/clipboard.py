@@ -145,3 +145,28 @@ def copy_text_as_file(text: str, filename: str):
     except OSError:
         return None
     return path if _set_file(path) else None
+
+
+def ask_filename(parent, default_key: str):
+    """「复制为文件」的文件名输入弹窗；确定返回文本，取消/空名返回 None。
+
+    手动构造 QInputDialog 并关闭 WindowContextHelpButtonHint——
+    Qt 在 Windows 上默认给标题栏加"?"帮助按钮，对本工具无意义（2026-10-26 用户反馈）。
+    """
+    import time as _time
+
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QDialog, QInputDialog
+
+    from ..i18n import tr
+
+    dlg = QInputDialog(parent)
+    dlg.setInputMode(QInputDialog.TextInput)
+    dlg.setWindowTitle(tr("copy_as_file"))
+    dlg.setLabelText(tr("filename_label"))
+    dlg.setTextValue(tr(default_key) % _time.strftime("%Y%m%d_%H%M%S"))
+    dlg.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+    if dlg.exec_() != QDialog.Accepted:
+        return None
+    text = dlg.textValue().strip()
+    return text if text else None

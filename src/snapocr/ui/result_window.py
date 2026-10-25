@@ -308,19 +308,14 @@ class ResultWindow(QWidget):
 
     def copy_txt_as_file(self):
         """把识别文本复制为 TXT 文件到剪贴板（弹窗输入文件名，默认同另存默认名）。"""
-        from PyQt5.QtWidgets import QInputDialog
-
         t = self.text.toPlainText()
         if not t:
             self._pop_toast(tr("ocr_empty"))
             return
         from . import clipboard as clip
 
-        default = tr("default_txt_filename") % time.strftime("%Y%m%d_%H%M%S")
-        text, ok = QInputDialog.getText(
-            self, tr("copy_as_file"), tr("filename_label"), text=default
-        )
-        if not ok or not text.strip():
+        text = clip.ask_filename(self, "default_txt_filename")
+        if text is None:
             return
         path = clip.copy_text_as_file(t, text)
         self._pop_toast(

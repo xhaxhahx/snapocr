@@ -164,15 +164,10 @@ class PreviewDialog(QWidget):
         """把预览图复制为 JPG 文件到剪贴板（弹窗输入文件名，默认同保存默认名）。"""
         if self._busy:
             return
-        from PyQt5.QtWidgets import QInputDialog
-
         from . import clipboard as clip
 
-        default = tr("default_filename_jpg") % time.strftime("%Y%m%d_%H%M%S")
-        text, ok = QInputDialog.getText(
-            self, tr("copy_as_file"), tr("filename_label"), text=default
-        )
-        if not ok or not text.strip():
+        text = clip.ask_filename(self, "default_filename_jpg")
+        if text is None:
             return
         self._set_busy(True)
         path = clip.copy_image_as_file(self.image, text)
