@@ -235,7 +235,8 @@ QPlainTextEdit { background: %(card)s; border: 1px solid %(border)s;
 QPushButton { background: %(card)s; border: 1px solid %(border)s; border-radius: 6px;
               padding: 6px 14px; font-size: 13px; color: %(text)s; }
 QPushButton:hover { background: %(hover)s; }
-QPushButton#primary { background: %(accent)s; border: none; color: %(on_acc)s; font-weight: 600; }
+QPushButton#primary { background: %(accent)s; border: 1px solid transparent;
+                     color: %(on_acc)s; font-weight: 600; }
 QPushButton#primary:hover { background: %(accent_h)s; }
 """ % {
         "bg": t.bg,
@@ -260,7 +261,7 @@ QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px;
                    color: %(text)s; background: %(bg)s; }
 QLineEdit, QSpinBox, QComboBox { background: %(card)s; color: %(text)s;
                                  border: 1px solid %(border)s; border-radius: 6px;
-                                 padding: 5px 8px; }
+                                 padding: 5px 8px; min-height: 20px; }
 QLineEdit:hover, QSpinBox:hover, QComboBox:hover { border-color: %(sub)s; }
 QComboBox QAbstractItemView { background: %(card)s; color: %(text)s;
                               selection-background-color: %(accent)s;
@@ -268,7 +269,8 @@ QComboBox QAbstractItemView { background: %(card)s; color: %(text)s;
 QPushButton { background: %(card)s; border: 1px solid %(border)s; border-radius: 6px;
               padding: 6px 16px; color: %(text)s; }
 QPushButton:hover { background: %(hover)s; }
-QPushButton#primary { background: %(accent)s; border: none; color: %(on_acc)s; font-weight: 600; }
+QPushButton#primary { background: %(accent)s; border: 1px solid transparent;
+                     color: %(on_acc)s; font-weight: 600; }
 QPushButton#primary:hover { background: %(accent_h)s; }
 QCheckBox { color: %(text)s; }
 """ % {

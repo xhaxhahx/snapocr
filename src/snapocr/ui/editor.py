@@ -137,6 +137,9 @@ class EditorToolbar(QWidget):
         self.btn_edit.setCheckable(True)
         self.btn_edit.setProperty("textBtn", True)
         self.btn_edit.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        # 图标约束到 16px + 固定高：图标按钮自然高度(29)比行 A 纯文字按钮(26)高 3px
+        self.btn_edit.setIconSize(QSize(16, 16))
+        self.btn_edit.setFixedHeight(26)
         self.btn_edit.clicked.connect(lambda: self.editToggled.emit(self.btn_edit.isChecked()))
         rowA.addWidget(self.btn_edit)
 

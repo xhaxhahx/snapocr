@@ -779,3 +779,41 @@ def run(ctx):
     )
     tbh.deleteLater()
     check("Z4 行B下拉高度与按钮齐平(34px)", z4)
+
+    # ---- Z5 全项目控件高度对齐清查（2026-10-26 举一反三） ----
+    from snapocr.ui.preview_dialog import PreviewDialog as _PV
+    from snapocr.ui.settings_dialog import SettingsDialog as _SD
+
+    tbz5 = EditorToolbar()
+    tbz5.show()
+    tbz5.set_expanded(True, animate=False)
+    app.processEvents()
+    # 行A：编辑按钮(有图标)与纯文字按钮等高
+    za = tbz5.btn_edit.height() == tbz5.btn_cancel.height()
+    # 行B：下拉与工具按钮等高
+    zb = tbz5.font_combo.height() == tbz5._tool_buttons["pen"].height()
+    tbz5.deleteLater()
+    app.processEvents()
+
+    imgz = QImage(60, 40, QImage.Format_RGB888)
+    imgz.fill(Qt.gray)
+    pvz = _PV(imgz, ctx.cfg)
+    pvz.show()
+    app.processEvents()
+    # 预览窗：primary 按钮与普通按钮等高（border:none → border:1px transparent 修复）
+    zp = pvz.btn_copy.height() == pvz.btn_save.height()
+    pvz.close()
+    pvz.deleteLater()
+    app.processEvents()
+
+    sdz = _SD(ctx.cfg)
+    sdz.show()
+    app.processEvents()
+    # 设置页：combo 与 line edit 等高（QSS min-height 修复）
+    zs = sdz.scale_combo.height() == sdz.dir_edit.height()
+    # 设置页按钮等高
+    zs2 = sdz.btn_ok.height() == sdz.btn_cancel.height()
+    sdz.close()
+    sdz.deleteLater()
+    app.processEvents()
+    check("Z5 全项目高度对齐(行A/行B/预览/设置)", za and zb and zp and zs and zs2)

@@ -83,7 +83,7 @@ class PreviewDialog(QWidget):
                           border-radius: 6px; padding: 6px 14px; color: %(text)s; }
             QPushButton:hover { background: %(hover)s; }
             QPushButton:disabled { color: %(sub)s; }
-            QPushButton#primary { background: %(accent)s; border: none;
+            QPushButton#primary { background: %(accent)s; border: 1px solid transparent;
                                   color: %(on_acc)s; font-weight: 600; }
             QPushButton#primary:hover { background: %(accent_h)s; }
         """
