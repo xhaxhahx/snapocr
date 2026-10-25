@@ -473,7 +473,7 @@ def main():
     from snapocr import i18n
 
     i18n.init_lang("en")
-    check("P10 语言切换可即时生效", i18n.tr("copy") == "Copy")
+    check("P10 语言切换可即时生效", i18n.tr("copy") == "Copy as image")
     i18n.init_lang("zh")
     cfg.set("mosaic_block", 33)
     sd3 = SettingsDialog(cfg)

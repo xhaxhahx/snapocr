@@ -731,3 +731,41 @@ def run(ctx):
     clipmod.cleanup_clip_files()
     y5 = y5 and not os.path.exists(os.path.dirname(p1))
     check("Y5 启动清理+i18n双语齐备", y5)
+
+    # ---- Z1~Z3 按钮改名 + Qt 原生控件翻译随语言（2026-10-26） ----
+    _i18n.init_lang("zh")
+    tbz = EditorToolbar()
+    rwz = ResultWindow(cfg=Config())
+    z1 = (
+        tbz.btn_copy.text().strip() == "复制为图片"
+        and tbz.btn_copyfile.text().strip() == "复制为jpg文件"
+        and rwz.btn_save.text().strip() == "保存"
+        and rwz.btn_copyfile.text().strip() == "复制为TXT文件"
+    )
+    tbz.deleteLater()
+    rwz.close()
+    rwz.deleteLater()
+    check("Z1 按钮改名(复制为图片/复制为jpg文件/保存)", z1)
+
+    from PyQt5.QtWidgets import QPlainTextEdit
+
+    _i18n.init_lang("zh")
+    pez = QPlainTextEdit()
+    m_zh = pez.createStandardContextMenu()
+    zh_actions = [a.text() for a in m_zh.actions() if a.text()]
+    z2a = any("复制" in t for t in zh_actions) and any("粘贴" in t for t in zh_actions)
+    z2b = app.translate("QDialogButtonBox", "OK") == "确定"
+    _i18n.init_lang("en")
+    m_en = pez.createStandardContextMenu()
+    en_actions = [a.text() for a in m_en.actions() if a.text()]
+    z2c = any("&Copy" in t for t in en_actions)
+    _i18n.init_lang("zh")  # 恢复探针主语言
+    check("Z2 Qt原生翻译随语言(zh中文/en英文)", z2a and z2b and z2c)
+
+    z3 = (
+        "qt-i18n" in _src("deploy/snapocr.spec")
+        and "qt-i18n" in _src("deploy/snapocr-onefile.spec")
+        and "qt-i18n" in _src("deploy/snapocr-linux.spec")
+        and os.path.isfile(os.path.join(ROOT, "resources", "qt-i18n", "qtbase_zh_CN.qm"))
+    )
+    check("Z3 三份spec登记qt-i18n+资源在位", z3)

@@ -17,6 +17,12 @@ datas = [
 _models_dir = os.path.join(ROOT, "resources", "models")
 if os.path.isdir(_models_dir):
     datas.append((_models_dir, "resources/models"))
+
+# Qt 原生控件中文翻译（QInputDialog 按钮/编辑控件右键菜单）。目录名用 qt-i18n：
+# _keep_qt_data 会过滤目标路径含 "translations/" 的条目，不能叫 translations
+_qt_i18n_dir = os.path.join(ROOT, "resources", "qt-i18n")
+if os.path.isdir(_qt_i18n_dir):
+    datas.append((_qt_i18n_dir, "resources/qt-i18n"))
 binaries = []
 hiddenimports = []
 for pkg in ("rapidocr", "onnxruntime", "comtypes"):

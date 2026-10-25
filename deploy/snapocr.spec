@@ -17,6 +17,12 @@ datas = [
 _models_dir = os.path.join(ROOT, "resources", "models")
 if os.path.isdir(_models_dir):
     datas.append((_models_dir, "resources/models"))
+
+# Qt 原生控件中文翻译（QInputDialog 按钮/编辑控件右键菜单）。目录名用 qt-i18n：
+# _keep_qt_data 会过滤目标路径含 "translations/" 的条目，不能叫 translations
+_qt_i18n_dir = os.path.join(ROOT, "resources", "qt-i18n")
+if os.path.isdir(_qt_i18n_dir):
+    datas.append((_qt_i18n_dir, "resources/qt-i18n"))
 # 说明: OCR 模型不再单独打包 —— rapidocr wheel 内置 PP-OCRv6 small(det/rec)
 # + PP-OCRv4 mobile(cls) 会被 collect_all('rapidocr') 带入 _internal/rapidocr/models，
 # 引擎在 resources/models 缺失时自动回落（resources/models 仍可放模型覆盖升级）。

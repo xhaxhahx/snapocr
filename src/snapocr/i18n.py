@@ -13,7 +13,7 @@ _ZH = {
     "hotkey_conflict": "快捷键注册失败，可能已被其他程序占用，请在设置中更换。",
     "hotkey_changed": "截屏快捷键已生效：{}",
     "ocr": "OCR识别",
-    "copy": "复制",
+    "copy": "复制为图片",
     "save": "保存",
     "edit": "编辑",
     "cancel": "取消",
@@ -34,7 +34,7 @@ _ZH = {
     "ocr_running": "正在识别…",
     "ocr_result": "OCR 识别结果",
     "ocr_copy_text": "复制文本",
-    "ocr_save_txt": "另存为TXT",
+    "ocr_save_txt": "保存",
     "ocr_retry": "重新识别",
     "ocr_empty": "未识别到文字",
     "ocr_lines": "{} 行 / {} 字 / 耗时 {:.1f}s",
@@ -68,10 +68,10 @@ _ZH = {
     "default_filename": "截图_%s.png",
     "default_txt_filename": "OCR_文本_%s.txt",
     "default_filename_jpg": "截图_%s.jpg",
-    "copy_file": "复制文件",
+    "copy_file": "复制为jpg文件",
     "copy_file_img_tip": "把标注图复制为JPG文件到剪贴板（粘贴到资源管理器/聊天窗口即得文件）",
     "copy_as_file": "复制为文件",
-    "copy_as_jpg": "复制为文件(JPG)",
+    "copy_as_jpg": "复制为jpg文件",
     "copy_as_txt_file": "复制为TXT文件",
     "filename_label": "文件名",
     "copied_as_file": "已复制文件：{}",
@@ -86,7 +86,7 @@ _ZH = {
     "color": "颜色",
     "hotkey_hint": "点击后直接按键盘录入，Esc 清空",
     "preview_title": "截图预览",
-    "preview_copy": "复制",
+    "preview_copy": "复制为图片",
     "preview_save": "另存",
     "preview_retry": "重试",
     "preview_cancel": "取消",
@@ -127,7 +127,7 @@ _EN = {
     "hotkey_conflict": "Hotkey registration failed (may be in use). Choose another in Settings.",
     "hotkey_changed": "Hotkey active: {}",
     "ocr": "OCR",
-    "copy": "Copy",
+    "copy": "Copy as image",
     "save": "Save",
     "edit": "Edit",
     "cancel": "Cancel",
@@ -148,7 +148,7 @@ _EN = {
     "ocr_running": "Recognizing…",
     "ocr_result": "OCR Result",
     "ocr_copy_text": "Copy text",
-    "ocr_save_txt": "Save as TXT",
+    "ocr_save_txt": "Save",
     "ocr_retry": "Re-run",
     "ocr_empty": "No text recognized",
     "ocr_lines": "{} lines / {} chars / {:.1f}s",
@@ -182,10 +182,10 @@ _EN = {
     "default_filename": "screenshot_%s.png",
     "default_txt_filename": "ocr_text_%s.txt",
     "default_filename_jpg": "screenshot_%s.jpg",
-    "copy_file": "Copy file",
+    "copy_file": "Copy as JPG file",
     "copy_file_img_tip": "Copy the annotated image as a JPG file to the clipboard",
     "copy_as_file": "Copy as file",
-    "copy_as_jpg": "Copy as file (JPG)",
+    "copy_as_jpg": "Copy as JPG file",
     "copy_as_txt_file": "Copy as TXT file",
     "filename_label": "File name",
     "copied_as_file": "File copied: {}",
@@ -200,7 +200,7 @@ _EN = {
     "color": "Color",
     "hotkey_hint": "Press keys to record; Esc clears",
     "preview_title": "Preview",
-    "preview_copy": "Copy",
+    "preview_copy": "Copy as image",
     "preview_save": "Save",
     "preview_retry": "Retry",
     "preview_cancel": "Cancel",
@@ -265,9 +265,49 @@ def init_lang(cfg_lang: str):
     global _current
     if cfg_lang in ("zh", "en"):
         _current = cfg_lang
-        return
-    loc = _system_lang()
-    _current = "en" if loc.lower().startswith("en") else "zh"
+    else:
+        loc = _system_lang()
+        _current = "en" if loc.lower().startswith("en") else "zh"
+    _apply_qt_translations()
+
+
+_qt_translator = None
+
+
+def _apply_qt_translations():
+    """按当前语言装载 Qt 原生控件翻译（QInputDialog 按钮、编辑控件右键菜单等）。
+
+    qtbase_zh_CN.qm 取自 Qt 官方翻译（PySide6 wheel 同源，147KB，离线随 resources
+    分发）；英文是源语言无需装载。文件缺失/无 QApplication 时失败安全跳过。
+    打包瘦身的 translations 剔除口径不受影响：那剔的是 Qt 插件目录死重量，这里是
+    单个应用资源（resources/qt-i18n，2026-10-26 增）。"""
+    global _qt_translator
+    try:
+        from PyQt5.QtCore import QTranslator
+        from PyQt5.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        if _qt_translator is not None:
+            app.removeTranslator(_qt_translator)
+            _qt_translator = None
+        if _current != "zh":
+            return
+        qm = os.path.join(_resources_dir(), "qt-i18n", "qtbase_zh_CN.qm")
+        t = QTranslator()
+        if os.path.isfile(qm) and t.load(qm):
+            _qt_translator = t
+            app.installTranslator(t)
+    except Exception:
+        # 翻译装载失败只影响原生控件文案，不阻断启动
+        pass
+
+
+def _resources_dir():
+    from .paths import resources_dir
+
+    return resources_dir()
 
 
 def tr(key: str, *args) -> str:
