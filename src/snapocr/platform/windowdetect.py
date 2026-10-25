@@ -82,20 +82,6 @@ def _top_window_at(x_phys, y_phys, min_size=40):
     return found[0] if found else None
 
 
-def _descend_child(hwnd, pt_screen):
-    """在顶层窗口内按屏幕坐标下钻子窗口控件（RealChildWindowFromPoint）。"""
-    user32 = ctypes.windll.user32
-    cur = hwnd
-    for _ in range(MAX_CHILD_DEPTH):
-        cpt = wt.POINT(pt_screen.x, pt_screen.y)
-        user32.ScreenToClient(cur, ctypes.byref(cpt))
-        child = user32.RealChildWindowFromPoint(cur, cpt)
-        if not child or child == cur:
-            break
-        cur = child
-    return cur if cur != hwnd else None
-
-
 def descend_rect_at(x_phys, y_phys, min_size=24):
     """控件级识别：顶层窗口 → 子窗口控件下钻，返回最终矩形，无则 None。"""
     if not IS_WIN:

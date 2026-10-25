@@ -12,7 +12,6 @@ import os
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import QApplication
 
 from ..utils.logger import get_logger
 
@@ -131,10 +130,6 @@ def _make_response(holder, loop):
         loop.quit()
 
     return _on
-
-
-def primary_screen():
-    return QApplication.primaryScreen()
 
 
 # ---------------- 抓屏环境探测（Windows 专用，其余平台安全返回 False） ----------------

@@ -420,16 +420,6 @@ def _poly(pts):
     return QPolygonF(pts)
 
 
-def _dist_seg(p: QPointF, a: QPointF, b: QPointF) -> float:
-    """点到线段的最短距离（保留 API：笔画命中判定工具）。"""
-
-    dx, dy = b.x() - a.x(), b.y() - a.y()
-    if dx == 0 and dy == 0:
-        return math.hypot(p.x() - a.x(), p.y() - a.y())
-    t = max(0.0, min(1.0, ((p.x() - a.x()) * dx + (p.y() - a.y()) * dy) / (dx * dx + dy * dy)))
-    return math.hypot(p.x() - (a.x() + t * dx), p.y() - (a.y() + t * dy))
-
-
 STANDARD_COLORS = [
     *COLORS,
     "#8e8e93",
@@ -762,53 +752,6 @@ class CanvasWidget(QWidget):
             p.drawEllipse(QRectF(off, off, ed, ed))
         p.end()
         self.setCursor(QCursor(pm, (d + 2) // 2, (d + 2) // 2))
-
-    ERASER_TOL = 4  # 命中容差（逻辑px）
-
-    def _hit_stroke(self, pt_dev):
-        """返回命中的最上层笔画索引（传入设备像素点），无则 None。"""
-        tol = self.ERASER_TOL * self.dpr
-        for i in range(len(self.strokes) - 1, -1, -1):
-            try:
-                if self._stroke_hit(self.strokes[i], pt_dev, tol):
-                    return i
-            except Exception:
-                # 单条笔画数据异常（历史脏数据）不影响其余笔画的命中判定
-                continue
-        return None
-
-    @staticmethod
-    def _stroke_hit(s, pt, tol) -> bool:
-        k = s["kind"]
-        if k in ("pen", "highlight"):
-            w = s["width"] / 2 + tol
-            pts = s["pts"]
-            if len(pts) == 1:
-                return (pt - pts[0]).manhattanLength() <= w
-            return any(_dist_seg(pt, a, b) <= w for a, b in zip(pts, pts[1:]))
-        if k == "shape":
-            if s["shape"] == "arrow":
-                return _dist_seg(pt, QPointF(s["start"]), QPointF(s["end"])) <= s["width"] + tol
-            r = QRectF(s["rect"]).adjusted(-tol, -tol, tol, tol)
-            if s["shape"] == "rect":
-                return r.contains(pt)
-            rx, ry = max(1.0, r.width() / 2), max(1.0, r.height() / 2)
-            dx = (pt.x() - r.center().x()) / rx
-            dy = (pt.y() - r.center().y()) / ry
-            return dx * dx + dy * dy <= 1.0
-        if k == "mosaic":
-            path = QPainterPath(s["path"])
-            path.setFillRule(Qt.WindingFill)
-            return path.contains(pt)
-        if k == "text":
-            size = float(s["size"])
-            lines = str(s["text"]).split("\n")
-            w = max((len(ln) for ln in lines), default=1) * size * 0.62
-            h = len(lines) * size * 1.35
-            return QRectF(
-                s["pos"].x() - tol, s["pos"].y() - tol, w + 2 * tol, h + 2 * tol
-            ).contains(pt)
-        return False
 
     def dev(self, p) -> QPointF:
         return QPointF(p.x() * self.dpr, p.y() * self.dpr)
