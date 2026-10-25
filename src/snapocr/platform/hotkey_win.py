@@ -12,6 +12,8 @@ HOTKEY_ID = 1001  # RegisterHotKey 的 id（遮罩模块常量，过滤器与管
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 0x0001, 0x0002, 0x0004, 0x0008
 MOD_NOREPEAT = 0x4000
 
+from ..i18n import tr  # noqa: E402
+
 _MOD_NAME = {Qt.META: MOD_WIN, Qt.CTRL: MOD_CONTROL, Qt.ALT: MOD_ALT, Qt.SHIFT: MOD_SHIFT}
 
 
@@ -93,7 +95,7 @@ class HotkeyManager(QObject):
         base = k & 0x01FFFFFF
         vk = _vk_for_key(base)
         if vk is None:
-            self.error.emit("不支持的按键: " + ks)
+            self.error.emit(tr("hotkey_unsupported") + ": " + ks)
             return False
         if not ctypes.windll.user32.RegisterHotKey(None, HOTKEY_ID, m | MOD_NOREPEAT, vk):
             # 改键失败回滚：register 首行已注销旧热键，不回滚则本会话热键彻底失效
@@ -104,7 +106,7 @@ class HotkeyManager(QObject):
                 self._current = ""  # 置空防递归回滚
                 with contextlib.suppress(Exception):
                     self.register(prev)
-            self.error.emit("RegisterHotKey 失败: " + ks)
+            self.error.emit(tr("hotkey_conflict"))
             return False
         self._filter = WinHotkeyFilter(lambda: self.activated.emit())
         from PyQt5.QtCore import QAbstractEventDispatcher

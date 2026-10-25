@@ -7,6 +7,7 @@ import threading
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
+from ..i18n import tr
 from ..utils.logger import get_logger
 
 log = get_logger()
@@ -61,7 +62,7 @@ class HotkeyManager(QObject):
         try:
             x11 = ctypes.CDLL("libX11.so.6")
         except OSError as e:
-            self.error.emit("无法加载 libX11: %s" % e)
+            self.error.emit(tr("hotkey_x11_fail") + ": %s" % e)
             return
         x11.XOpenDisplay.restype = ctypes.c_void_p
         x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
@@ -90,7 +91,7 @@ class HotkeyManager(QObject):
 
         dpy = x11.XOpenDisplay(None)
         if not dpy:
-            self.error.emit("无法打开 X Display")
+            self.error.emit(tr("hotkey_no_display"))
             return
         root = x11.XDefaultRootWindow(dpy)
 
@@ -103,7 +104,7 @@ class HotkeyManager(QObject):
         keycode = x11.XKeysymToKeycode(dpy, keysym) if keysym else 0
         if not keycode:
             x11.XCloseDisplay(dpy)
-            self.error.emit("不支持的按键: " + seq_text)
+            self.error.emit(tr("hotkey_unsupported") + ": " + seq_text)
             return
 
         # 吞掉 BadAccess（热键被占用时）
@@ -125,7 +126,7 @@ class HotkeyManager(QObject):
                 with contextlib.suppress(Exception):
                     x11.XUngrabKey(dpy, keycode, m, root)
             x11.XCloseDisplay(dpy)
-            self.error.emit("热键注册失败(可能被占用): " + seq_text)
+            self.error.emit(tr("hotkey_conflict"))
             return
 
         x11.XSelectInput(dpy, root, 0x2)  # KeyPressMask

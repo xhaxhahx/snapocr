@@ -51,10 +51,12 @@ def install_excepthook(dialog=True):
                 from PyQt5.QtWidgets import QApplication, QMessageBox
 
                 if QApplication.instance() is not None:
+                    from ..i18n import tr
+
                     box = QMessageBox()
                     box.setIcon(QMessageBox.Critical)
                     box.setWindowTitle(APP_DISPLAY)
-                    box.setText("程序遇到未处理的错误，详情见日志文件。")
+                    box.setText(tr("unhandled_error"))
                     box.setDetailedText("".join(traceback.format_exception(t, v, tb)))
                     box.exec_()
             except Exception:
