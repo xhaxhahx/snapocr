@@ -263,6 +263,8 @@ class EditorToolbar(QWidget):
             self.width_combo.addItem(tr(key), w)
         self.width_combo.setCurrentIndex(1)  # 默认「中」(5px)，与画布初始 line_width 一致
         self.width_combo.setFixedWidth(58)
+        # 高度与 34x34 工具按钮齐平：QComboBox 默认高度随字体/样式涨到 ~38px，破坏行 B 对齐
+        self.width_combo.setFixedHeight(34)
         self.width_combo.currentIndexChanged.connect(
             lambda i: self.widthChanged.emit(self.width_combo.itemData(i))
         )
@@ -273,6 +275,7 @@ class EditorToolbar(QWidget):
             self.size_combo.addItem("%d px" % s, s)
         self.size_combo.setCurrentIndex(1)  # 默认 18px，与画布初始 text_size 一致
         self.size_combo.setFixedWidth(64)
+        self.size_combo.setFixedHeight(34)
         self.size_combo.currentIndexChanged.connect(
             lambda i: self.textSizeChanged.emit(self.size_combo.itemData(i))
         )
@@ -281,6 +284,7 @@ class EditorToolbar(QWidget):
 
         self.font_combo = EdgeAwareFontComboBox()
         self.font_combo.setFixedWidth(170)
+        self.font_combo.setFixedHeight(34)
         self.font_combo.setCurrentFont(QFont("Microsoft YaHei"))
         self.font_combo.currentFontChanged.connect(lambda f: self.fontChanged.emit(f.family()))
         rowB.addWidget(self.font_combo)

@@ -769,3 +769,13 @@ def run(ctx):
         and os.path.isfile(os.path.join(ROOT, "resources", "qt-i18n", "qtbase_zh_CN.qm"))
     )
     check("Z3 三份spec登记qt-i18n+资源在位", z3)
+
+    # ---- Z4 行B控件高度与工具按钮齐平（2026-10-26：字号/字体下拉偏高破坏对齐） ----
+    tbh = EditorToolbar()
+    z4 = (
+        tbh.width_combo.height() == tbh._tool_buttons["pen"].height() == 34
+        and tbh.size_combo.height() == 34
+        and tbh.font_combo.height() == 34
+    )
+    tbh.deleteLater()
+    check("Z4 行B下拉高度与按钮齐平(34px)", z4)
