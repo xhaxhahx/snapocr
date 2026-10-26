@@ -942,3 +942,27 @@ def run(ctx):
     rwz8.close()
     rwz8.deleteLater()
     check("Z8 结果窗五按钮tooltip齐备", z8)
+
+    # ---- Z9 色板预置当前色（架构检查：ColorPickerPopup.current 曾完全未使用） ----
+
+    from PyQt5.QtGui import QColor as _QColor
+
+    from snapocr.ui.editor import STANDARD_COLORS as _SC
+    from snapocr.ui.editor import ColorPickerPopup as _CPP
+
+    _cur = _QColor(_SC[0])
+    cp = _CPP(_SC[0])  # 用标准色，保证 Z9c 能命中被高亮的按钮
+    # 色谱光标位置应与该色的 HSV 一致（sat/val 各允许 0.02 误差）
+    z9a = (
+        abs(cp._sv._sat - _cur.hsvSaturationF()) < 0.02 and abs(cp._sv._val - _cur.valueF()) < 0.02
+    )
+    z9b = abs(cp._hue._hue - max(0.0, _cur.hsvHueF())) < 0.02
+    # 当前色对应的标准色按钮应带高亮样式
+    # 用 QToolButton 遍历更直接
+    from PyQt5.QtWidgets import QToolButton as _QTB
+
+    z9c = any("border" in b.styleSheet() for b in cp.findChildren(_QTB) if b.styleSheet())
+    cp.deleteLater()
+    check("Z9a 色板色谱预置当前色", z9a)
+    check("Z9b 色板色相条预置当前色相", z9b)
+    check("Z9c 色板高亮当前标准色", z9c)

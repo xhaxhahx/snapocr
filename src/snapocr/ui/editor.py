@@ -203,7 +203,7 @@ class EditorToolbar(QWidget):
         self.rowB_widget.setMaximumHeight(0)  # 初始收起；高度动画只改这一个值
         self._rowb_anim = None
 
-        def tool_btn(kind, ic, tip):
+        def tool_btn(kind, tip):
             b = QToolButton(objectName="t_" + kind)
             b.setToolTip(tip)
             b.setCheckable(True)
@@ -214,15 +214,15 @@ class EditorToolbar(QWidget):
             rowB.addWidget(b)
             return b
 
-        tool_btn(TOOL_SELECT, "select", tr("edit"))
-        tool_btn(TOOL_PEN, "pen", tr("tool_pen"))
-        tool_btn(TOOL_HIGHLIGHT, "highlight", tr("tool_highlight"))
-        tool_btn(TOOL_TEXT, "text", tr("tool_text"))
-        tool_btn(TOOL_RECT, "rect", tr("tool_rect"))
-        tool_btn(TOOL_ELLIPSE, "ellipse", tr("tool_ellipse"))
-        tool_btn(TOOL_ARROW, "arrow", tr("tool_arrow"))
-        tool_btn(TOOL_MOSAIC, "mosaic", tr("tool_mosaic"))
-        tool_btn(TOOL_ERASER, "eraser", tr("tool_eraser"))
+        tool_btn(TOOL_SELECT, tr("edit"))
+        tool_btn(TOOL_PEN, tr("tool_pen"))
+        tool_btn(TOOL_HIGHLIGHT, tr("tool_highlight"))
+        tool_btn(TOOL_TEXT, tr("tool_text"))
+        tool_btn(TOOL_RECT, tr("tool_rect"))
+        tool_btn(TOOL_ELLIPSE, tr("tool_ellipse"))
+        tool_btn(TOOL_ARROW, tr("tool_arrow"))
+        tool_btn(TOOL_MOSAIC, tr("tool_mosaic"))
+        tool_btn(TOOL_ERASER, tr("tool_eraser"))
 
         sepB = QFrame()
         sepB.setObjectName("sep")
@@ -254,6 +254,17 @@ class EditorToolbar(QWidget):
         sepB2.setFixedSize(1, 26)
         rowB.addWidget(sepB2)
 
+        self._build_rowB_selectors(rowB, parent)
+
+        self.set_expanded(False, animate=False)
+        self.retheme(theme.current())
+        theme.manager.changed.connect(self.retheme)
+
+    def _build_rowB_selectors(self, rowB, parent):
+        """行 B 的颜色芯片与四个下拉（粗细/字号/字重/字体）。
+
+        从 __init__ 拆出（构造器曾达 202 行，宪法 §4.1 单函数 200 行上限）。
+        """
         # 颜色芯片按钮 → 双列色板弹窗（左：标准色，右：色谱）
         self.btn_color = QToolButton(objectName="btnColor")
         self.btn_color.setToolTip(tr("color"))
@@ -318,10 +329,6 @@ class EditorToolbar(QWidget):
         rowB.addWidget(self.font_combo)
         rowB.addStretch(1)  # 同上：保持按钮间距不随工具条宽度变化
         self.font_combo.hide()
-
-        self.set_expanded(False, animate=False)
-        self.retheme(theme.current())
-        theme.manager.changed.connect(self.retheme)
 
     # ---- 颜色芯片/色板弹窗 ----
     def _set_color_chip(self, hexc):
@@ -476,6 +483,16 @@ class _SVArea(QWidget):
         self.update()
         self._emit_live()
 
+    def set_color(self, c):
+        """预置当前颜色（打开色板时把光标放到实际位置，不发信号）。"""
+        if not c.isValid():
+            return
+        h, s, v = c.hsvHueF(), c.hsvSaturationF(), c.valueF()
+        self._hue = h if h >= 0 else 0.0
+        self._sat = min(1.0, max(0.0, s))
+        self._val = min(1.0, max(0.0, v))
+        self.update()
+
     def current_color(self) -> QColor:
         return QColor.fromHsvF(min(0.9999, self._hue), self._sat, self._val)
 
@@ -514,14 +531,26 @@ class _SVArea(QWidget):
 class _HueStrip(QWidget):
     huePicked = pyqtSignal(float)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, hue=0.0):
         super().__init__(parent)
         self.setFixedSize(16, 120)
+        self._hue = min(0.9999, max(0.0, float(hue)))
+
+    def set_hue(self, hue):
+        """外部设定当前色相（打开色板时预置当前颜色，否则用户看不到位置）。"""
+        self._hue = min(0.9999, max(0.0, float(hue)))
+        self.update()
 
     def paintEvent(self, ev):
         p = QPainter(self)
         for y in range(0, self.height(), 2):
             p.fillRect(0, y, self.width(), 2, QColor.fromHsvF(min(0.9999, y / self.height()), 1, 1))
+        # 当前色相标记：左右各一条短横线（白描边 + 黑芯，亮暗背景都可辨）
+        cy = self._hue * self.height()
+        p.setPen(QPen(QColor("#ffffff"), 3))
+        p.drawLine(QPointF(-1, cy), QPointF(self.width() + 1, cy))
+        p.setPen(QPen(QColor("#000000"), 1))
+        p.drawLine(QPointF(-1, cy), QPointF(self.width() + 1, cy))
         p.end()
 
     def mousePressEvent(self, ev):
@@ -549,6 +578,13 @@ class ColorPickerPopup(QFrame):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(10)
 
+        # 当前色：用于高亮标准色并在色谱上预置位置。此前该参数完全未使用，
+        # 打开色板时用户看不到当前颜色在哪（本轮架构检查发现）。
+        cur = QColor(current) if current else QColor(STANDARD_COLORS[0])
+        if not cur.isValid():
+            cur = QColor(STANDARD_COLORS[0])
+        cur_hex = cur.name()
+
         grid = QGridLayout()
         grid.setSpacing(4)
         for i, hexc in enumerate(STANDARD_COLORS):
@@ -562,6 +598,13 @@ class ColorPickerPopup(QFrame):
             p.end()
             b.setIcon(QIcon(pm))
             b.setIconSize(QSize(20, 20))
+            # 当前色加白色描边（与外圈深色形成对比，深浅主题都可辨）
+            if hexc.lower() == cur_hex.lower():
+                b.setStyleSheet(
+                    "QToolButton{border:2px solid #ffffff;border-radius:4px;"
+                    "background:rgba(0,0,0,60);}"
+                )
+                b.setToolTip(tr("current_color"))
             b.clicked.connect(lambda _=False, hx=hexc: self._pick(hx))
             grid.addWidget(b, i % 8, i // 8)
         root.addLayout(grid)
@@ -569,7 +612,8 @@ class ColorPickerPopup(QFrame):
         col2 = QVBoxLayout()
         col2.setSpacing(6)
         self._sv = _SVArea()
-        self._hue = _HueStrip()
+        self._hue = _HueStrip(hue=cur.hsvHueF() if cur.hsvHueF() >= 0 else 0.0)
+        self._sv.set_color(cur)
         self._sv.colorPicked.connect(lambda c: self.colorLive.emit(c.name()))
         self._hue.huePicked.connect(self._sv.set_hue)  # 拖色相条也实时发色
         col2.addWidget(self._sv)

@@ -66,6 +66,7 @@ def build_checks(fast, skip_ruff, ruff):
         )
         checks.append(("静态检查 ruff check", [*ruff, "check", "src", "scripts"]))
     checks.append(("语法编译 compileall", [PY, "-m", "compileall", "-q", "src/snapocr", "scripts"]))
+    checks.append(("单元测试 test_unit", [PY, os.path.join("scripts", "test_unit.py")]))
     checks.append(
         ("回归守住项探针 test_plan_probe", [PY, os.path.join("scripts", "test_plan_probe.py")])
     )
