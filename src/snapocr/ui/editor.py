@@ -56,6 +56,13 @@ TOOL_ARROW = "arrow"
 TOOL_MOSAIC = "mosaic"
 TOOL_ERASER = "eraser"
 
+# 文字字重：QFont.Weight 值 + i18n 键
+TEXT_WEIGHTS = [
+    (QFont.Light, "weight_light"),
+    (QFont.Normal, "weight_normal"),
+    (QFont.Bold, "weight_bold"),
+]
+
 COLORS = ["#ff3b30", "#ff9500", "#ffd60a", "#34c759", "#2f7cf6", "#af52de", "#1d1d1f", "#ffffff"]
 # 档位：(px, i18n 键)。用户可见文案必须走 tr()（docs/10 §4.3-19），中英在 i18n.py 齐备。
 WIDTHS = [(2, "width_thin"), (5, "width_medium"), (10, "width_thick"), (16, "width_bold")]
@@ -101,6 +108,7 @@ class EditorToolbar(QWidget):
     colorChanged = pyqtSignal(str)
     widthChanged = pyqtSignal(int)
     textSizeChanged = pyqtSignal(int)
+    textWeightChanged = pyqtSignal(int)
     fontChanged = pyqtSignal(str)
     editToggled = pyqtSignal(bool)  # 编辑菜单展开/收起
     undoClicked = pyqtSignal()
@@ -268,6 +276,7 @@ class EditorToolbar(QWidget):
         self.width_combo.setFixedWidth(58)
         # 高度与 34x34 工具按钮齐平：QComboBox 默认高度随字体/样式涨到 ~38px，破坏行 B 对齐
         self.width_combo.setFixedHeight(34)
+        self.width_combo.setToolTip(tr("width_hint"))
         self.width_combo.currentIndexChanged.connect(
             lambda i: self.widthChanged.emit(self.width_combo.itemData(i))
         )
@@ -279,15 +288,31 @@ class EditorToolbar(QWidget):
         self.size_combo.setCurrentIndex(1)  # 默认 18px，与画布初始 text_size 一致
         self.size_combo.setFixedWidth(64)
         self.size_combo.setFixedHeight(34)
+        self.size_combo.setToolTip(tr("text_size_hint"))
         self.size_combo.currentIndexChanged.connect(
             lambda i: self.textSizeChanged.emit(self.size_combo.itemData(i))
         )
         rowB.addWidget(self.size_combo)
         self.size_combo.hide()
 
+        # 文字字重（粗细）：仅文字工具激活时显示
+        self.weight_combo = EdgeAwareComboBox()
+        for weight, key in TEXT_WEIGHTS:
+            self.weight_combo.addItem(tr(key), weight)
+        self.weight_combo.setCurrentIndex(1)  # 默认常规
+        self.weight_combo.setFixedWidth(58)
+        self.weight_combo.setFixedHeight(34)
+        self.weight_combo.setToolTip(tr("text_weight_hint"))
+        self.weight_combo.currentIndexChanged.connect(
+            lambda i: self.textWeightChanged.emit(self.weight_combo.itemData(i))
+        )
+        rowB.addWidget(self.weight_combo)
+        self.weight_combo.hide()
+
         self.font_combo = EdgeAwareFontComboBox()
         self.font_combo.setFixedWidth(170)
         self.font_combo.setFixedHeight(34)
+        self.font_combo.setToolTip(tr("font_hint"))
         self.font_combo.setCurrentFont(QFont("Microsoft YaHei"))
         self.font_combo.currentFontChanged.connect(lambda f: self.fontChanged.emit(f.family()))
         rowB.addWidget(self.font_combo)
@@ -401,6 +426,7 @@ class EditorToolbar(QWidget):
         self.current_tool = kind
         is_text = kind == TOOL_TEXT
         self.size_combo.setVisible(is_text)
+        self.weight_combo.setVisible(is_text)
         self.font_combo.setVisible(is_text)
         self.width_combo.setVisible(not is_text)
         self.adjustSize()
@@ -607,6 +633,7 @@ class CanvasWidget(QWidget):
         self.line_width = 5  # 逻辑px（不可命名 width，会遮蔽 QWidget.width()）；默认适中档
         self.text_size = 18  # 逻辑px
         self.text_font = "Microsoft YaHei"  # 文字工具字体
+        self.text_weight = QFont.Normal  # 文字字重（Light/Normal/Bold）
         self._current = None
         self._text_edit = None
         self._text_pos = QPointF()
@@ -853,6 +880,7 @@ class CanvasWidget(QWidget):
         elif kind == "text":
             f = QFont(s.get("font") or self._ui_font())
             f.setPixelSize(int(s["size"]))
+            f.setWeight(int(s.get("weight", QFont.Normal)))
             p.setFont(f)
             p.setPen(QColor(s["color"]))
             lh = int(s["size"] * 1.35)
@@ -1029,7 +1057,14 @@ class CanvasWidget(QWidget):
         e.setStyleSheet(
             "QTextEdit#textInput { background: rgba(255,255,255,235); color: %s;"
             " border: 1px dashed %s; font-size: %dpx; padding: 2px;"
-            ' font-family: "%s"; }' % (self.color, theme.current().accent_css, size, self.text_font)
+            ' font-family: "%s"; font-weight: %d; }'
+            % (
+                self.color,
+                theme.current().accent_css,
+                size,
+                self.text_font,
+                self.text_weight,
+            )
         )
         # 贴右/下缘时钳回画布内：输入框被裁掉就成了盲打（U2，实测曾 91% 不可见）
         w = min(420, max(180, self.width() - int(pos_l.x()) - 8))
@@ -1079,6 +1114,7 @@ class CanvasWidget(QWidget):
                 "text": text,
                 "color": self.color,
                 "font": self.text_font,
+                "weight": int(self.text_weight),
                 "size": int(self.text_size * self.dpr),
             }
             self.strokes.append(s)

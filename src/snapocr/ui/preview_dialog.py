@@ -81,11 +81,15 @@ class PreviewDialog(QWidget):
                            border-radius: 6px; }
             QPushButton { background: %(card)s; border: 1px solid %(border)s;
                           border-radius: 6px; padding: 6px 14px; color: %(text)s; }
-            QPushButton:hover { background: %(hover)s; }
+            QPushButton:hover { background: %(hover)s; border: 2px solid %(accent)s;
+                                padding: 5px 13px; }
+            QPushButton:pressed { background: %(card)s; border: 1px solid %(accent)s;
+                                  padding: 6px 14px; }
             QPushButton:disabled { color: %(sub)s; }
             QPushButton#primary { background: %(accent)s; border: 1px solid transparent;
                                   color: %(on_acc)s; font-weight: 600; }
-            QPushButton#primary:hover { background: %(accent_h)s; }
+            QPushButton#primary:hover { background: %(accent_h)s; border: 2px solid %(accent)s;
+                                        padding: 5px 13px; }
         """
             % {
                 "bg": t.bg,

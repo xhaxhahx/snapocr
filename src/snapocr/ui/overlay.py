@@ -127,6 +127,7 @@ class OverlayWindow(QWidget):
         self.toolbar.colorChanged.connect(self._on_color)
         self.toolbar.widthChanged.connect(self._on_width)
         self.toolbar.textSizeChanged.connect(self._on_text_size)
+        self.toolbar.textWeightChanged.connect(self._on_text_weight)
         self.toolbar.fontChanged.connect(self._on_font)
         self.toolbar.undoClicked.connect(lambda: self.canvas and self.canvas.undo())
         self.toolbar.redoClicked.connect(lambda: self.canvas and self.canvas.redo())
@@ -230,11 +231,12 @@ class OverlayWindow(QWidget):
         self.canvas = CanvasWidget(
             img, self.dpr, mosaic_block=int(self.cfg.get("mosaic_block", 10)), parent=self
         )
-        # 重新框选后新画布沿用工具条当前的颜色/粗细/字号/字体：工具条是会话内的
+        # 重新框选后新画布沿用工具条当前的颜色/粗细/字号/字重/字体：工具条是会话内的
         # 状态持有者（画布随 teardown 销毁重建，曾回默认红/中档，与色片显示不一致）
         self.canvas.color = self.toolbar.btn_color._hex
         self.canvas.line_width = self.toolbar.width_combo.currentData() or 5
         self.canvas.text_size = self.toolbar.size_combo.currentData() or 18
+        self.canvas.text_weight = self.toolbar.weight_combo.currentData() or QFont.Normal
         self.canvas.text_font = self.toolbar.font_combo.currentFont().family()
         self.canvas.setGeometry(self._content_rect().toRect())
         self.canvas.show()
@@ -277,6 +279,9 @@ class OverlayWindow(QWidget):
 
     def _on_text_size(self, s):
         self.canvas.text_size = s
+
+    def _on_text_weight(self, weight):
+        self.canvas.text_weight = weight
 
     def _on_font(self, family):
         self.canvas.text_font = family
