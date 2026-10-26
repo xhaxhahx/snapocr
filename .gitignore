@@ -32,3 +32,5 @@ docs/14-*.md
 deploy/windows/vc_redist.x64.exe
 
 docs/01-*.md
+# 内部审查提示词（非项目文档）
+docs/_prompts/

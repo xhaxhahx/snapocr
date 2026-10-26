@@ -17,10 +17,11 @@ if exist "dist\SnapOCR-1.0.0-win64-绿色版.zip" del "dist\SnapOCR-1.0.0-win64-
 powershell -NoProfile -Command "Compress-Archive -Path 'dist\snapocr-win64\*' -DestinationPath 'dist\SnapOCR-1.0.0-win64-绿色版.zip' -Force" || goto :err
 
 echo [3/4] Locating Inno Setup (ISCC)...
-set ISCC="%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
-if not exist %ISCC% set ISCC="%ProgramFiles%\Inno Setup 6\ISCC.exe"
-if not exist %ISCC% set ISCC="%ProgramFiles%\Inno Setup 7\ISCC.exe"
+REM Inno Setup 7 first (current release env), 6.x as fallback
+set ISCC="%ProgramFiles%\Inno Setup 7\ISCC.exe"
 if not exist %ISCC% set ISCC="%ProgramFiles(x86)%\Inno Setup 7\ISCC.exe"
+if not exist %ISCC% set ISCC="%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not exist %ISCC% set ISCC="%ProgramFiles%\Inno Setup 6\ISCC.exe"
 if not exist %ISCC% (
     echo   Inno Setup not found, skipping installer.
     echo [OK] portable zip: dist\SnapOCR-1.0.0-win64-绿色版.zip
@@ -30,7 +31,7 @@ if not exist %ISCC% (
 echo [4/4] Building installer...
 %ISCC% deploy\windows\snapocr.iss || goto :err
 echo [OK] done:
-echo   dist\SnapOCR-1.0.0-win64-绿色版.zip
+echo   dist\SnapOCR-1.0.0-win64-portable.zip  (release asset name)
 echo   dist\SnapOCR-1.0.0-win64-setup.exe
 exit /b 0
 
