@@ -18,7 +18,7 @@ from PyQt5.QtNetwork import QLocalSocket
 from PyQt5.QtTest import QTest
 
 from snapocr.config import Config
-from snapocr.ui.editor import CanvasWidget
+from snapocr.ui.editor import TOOL_PEN, TOOL_TEXT, CanvasWidget
 from snapocr.ui.overlay import OverlayWindow
 from snapocr.ui.result_window import ResultWindow
 from snapocr.ui.settings_dialog import HotkeyEdit
@@ -817,3 +817,128 @@ def run(ctx):
     sdz.deleteLater()
     app.processEvents()
     check("Z5 全项目高度对齐(行A/行B/预览/设置)", za and zb and zp and zs and zs2)
+
+    # ---- Z6~Z8 字重选择器 / tooltip / 悬停 QSS（2026-10-26 用户反馈） ----
+    tbz6 = EditorToolbar()
+    # Z6a 字重下拉存在且默认常规，仅文字工具可见
+    z6a = (
+        tbz6.weight_combo.count() == 3
+        and tbz6.weight_combo.currentData() == int(QFont.Normal)
+        and tbz6.weight_combo.isHidden()
+    )
+    tbz6.set_tool(TOOL_TEXT)
+    z6a = z6a and not tbz6.weight_combo.isHidden() and tbz6.width_combo.isHidden()
+    tbz6.set_tool(TOOL_PEN)
+    z6a = z6a and tbz6.weight_combo.isHidden() and not tbz6.width_combo.isHidden()
+
+    # Z6b 字重写入笔画：画布 weight → stroke["weight"] → QFont.setWeight 渲染
+    basz = QImage(300, 200, QImage.Format_RGB888)
+    basz.fill(Qt.white)
+    cvz = CanvasWidget(basz, 1.0, mosaic_block=10)
+    cvz._px_timer.stop()
+    cvz.text_weight = QFont.Bold
+    cvz.tool = TOOL_TEXT
+    cvz._open_text_edit(QPointF(20, 20))
+    cvz._text_edit.setPlainText("Z6粗体")
+    cvz._commit_text_edit()
+    stroke_z = cvz.strokes[-1] if cvz.strokes else {}
+    z6b = stroke_z.get("weight") == int(QFont.Bold)
+    # 渲染验证：粗体与常规渲染像素有差异（out_n=Normal、out_b=Bold，两次都 rebuild）
+    cvz.strokes[-1]["weight"] = int(QFont.Normal)
+    cvz._rebuild_layer()
+    out_n = cvz.render_to_image()
+    cvz.strokes[-1]["weight"] = int(QFont.Bold)
+    cvz._rebuild_layer()
+    out_b = cvz.render_to_image()
+    diff_px = sum(
+        1
+        for y in range(0, out_n.height(), 3)
+        for x in range(0, out_n.width(), 3)
+        if out_n.pixelColor(x, y) != out_b.pixelColor(x, y)
+    )
+    z6b = z6b and diff_px > 10
+    cvz.deleteLater()
+
+    # Z6c 工具条四下拉 tooltip 齐备
+    z6c = (
+        bool(tbz6.width_combo.toolTip())
+        and bool(tbz6.size_combo.toolTip())
+        and bool(tbz6.weight_combo.toolTip())
+        and bool(tbz6.font_combo.toolTip())
+    )
+    tbz6.deleteLater()
+    check("Z6 文字字重选择器(可见性/笔画/渲染)+四下拉tooltip", z6a and z6b and z6c)
+
+    # Z7 悬停 QSS：工具条按钮/下拉 hover 边框 2px；结果窗按钮 hover 同款
+    from snapocr.ui.theme import qss_result, qss_settings, qss_toolbar
+
+    _tq = qss_toolbar(
+        _i18n.__class__
+        and type(
+            "T",
+            (),
+            {
+                "toolbar_bg": "#f9f9f9",
+                "border": "#ccc",
+                "text": "#000",
+                "hover": "#eee",
+                "card": "#fff",
+                "accent_css": "#0078d4",
+                "accent_hover": "#1a86d9",
+                "on_accent": "#fff",
+                "icon": "#333",
+            },
+        )(),
+        "edToolbar",
+    )
+    z7a = "QToolButton:hover" in _tq and "border: 2px solid" in _tq and "QComboBox:hover" in _tq
+    _rq = qss_result(
+        type(
+            "T",
+            (),
+            {
+                "bg": "#fff",
+                "card": "#fff",
+                "text": "#000",
+                "subtext": "#666",
+                "border": "#ccc",
+                "hover": "#eee",
+                "accent_css": "#0078d4",
+                "accent_hover": "#1a86d9",
+                "on_accent": "#fff",
+            },
+        )()
+    )
+    z7b = "QPushButton:hover" in _rq and "border: 2px solid" in _rq
+    _sq = qss_settings(
+        type(
+            "T",
+            (),
+            {
+                "bg": "#fff",
+                "card": "#fff",
+                "text": "#000",
+                "subtext": "#666",
+                "border": "#ccc",
+                "hover": "#eee",
+                "accent_css": "#0078d4",
+                "accent_hover": "#1a86d9",
+                "on_accent": "#fff",
+            },
+        )()
+    )
+    z7c = "QPushButton:hover" in _sq and "border-color: %(accent)s" not in _sq
+    check("Z7 悬停QSS统一(border 2px accent)", z7a and z7b and z7c)
+
+    # Z8 结果窗按钮 tooltip 齐备
+    rwz8 = ResultWindow(cfg=Config())
+    z8 = (
+        bool(rwz8.btn_copy.toolTip())
+        and bool(rwz8.btn_copyfile.toolTip())
+        and bool(rwz8.btn_save.toolTip())
+        and bool(rwz8.btn_rerun.toolTip())
+        and bool(rwz8.btn_close.toolTip())
+    )
+    rwz8.close()
+    rwz8.deleteLater()
+    check("Z8 结果窗五按钮tooltip齐备", z8)
