@@ -308,7 +308,12 @@ class OverlayWindow(QWidget):
             y = self.sel.top() - ts_h - 8
             if y < 4:
                 y = self.height() - ts_h - 4
+        old = self.toolbar.geometry()
         self.toolbar.move(int(x), int(y))
+        # 工具条是子 widget：移走后旧位置露出的是本窗口的底图，必须由父窗口重绘。
+        # 拖动选区时每帧位移可达数十像素，只靠 _update_sel_dirty 的余量覆盖不住。
+        if old != self.toolbar.geometry():
+            self.update(old)
 
     # ---------- 绘制 ----------
     def _update_all(self):
@@ -698,6 +703,24 @@ class OverlayWindow(QWidget):
         else:
             self._resize(pos)
 
+    def _update_sel_dirty(self, old_sel, new_sel=None):
+        """拖动/缩放选区：只重绘旧新选区的并集，而不是整屏。
+
+        为什么不是全量：1080p 全屏重绘实测 7.7ms/帧（125% 缩放下更高），
+        叠加事件循环与 DWM 合成后拖动明显不跟手；而选区之外的底图与暗化层
+        在拖动期间完全不变，没有重绘的必要。
+
+        余量：上方 40px（尺寸标签画在选区上方，高约 24 + 间距 6）、其余 16px
+        （手柄半径 5 + 边框 2 + dpr≠1 的设备像素 rounding）。dpr≠1 时
+        Qt 把逻辑脏区换算设备像素会取整，余量给足可避免边缘漏列（参见
+        `_update_magnifier_dirty` 的同类教训）。
+        """
+        r = QRectF(old_sel)
+        if new_sel is not None:
+            r = r.united(QRectF(new_sel))
+        r = r.adjusted(-16, -40, 16, 16)
+        self.update(r.toAlignedRect().intersected(self.rect()))
+
     def _move_sel_to(self, new_tl):
         target = self._snap_target_at(self._mouse_pos)
         if target is not None:
@@ -706,6 +729,7 @@ class OverlayWindow(QWidget):
         if abs(delta.x()) < 0.01 and abs(delta.y()) < 0.01:
             return  # 吸附把位置钉回原处：无实际位移，不当作"移动选区"
         self.selectionMoved.emit()  # 真实位移发生 → 联动关闭结果窗（§33.1 A9）
+        old_sel = QRectF(self.sel)
         self.sel.moveTopLeft(new_tl)
         if self.canvas is not None:
             # 取景框语义：框移到哪，内容就取屏幕冻结图的哪块（笔画锚定屏幕位置）
@@ -713,9 +737,10 @@ class OverlayWindow(QWidget):
             self.canvas.set_base(self.img.copy(self._dev_rect(self._content_rect())))
             self.canvas.shift_strokes(-delta.x() * self.dpr, -delta.y() * self.dpr)
         self._reposition_toolbar()
-        self._update_all()
+        self._update_sel_dirty(old_sel, self.sel)
 
     def _resize(self, pos):
+        old_sel = QRectF(self.sel)
         r = QRectF(self.sel)
         d = self.resize_dir
         target = self._snap_target_at(self._mouse_pos)
@@ -740,7 +765,7 @@ class OverlayWindow(QWidget):
             self.canvas.set_base(self.img.copy(self._dev_rect(self._content_rect())))
             self.canvas.shift_strokes(-delta.x() * self.dpr, -delta.y() * self.dpr)
         self._reposition_toolbar()
-        self._update_all()
+        self._update_sel_dirty(old_sel, self.sel)
         self._update_resize_magnifier()  # U6：手柄缩放期间跟随的像素级放大镜
 
     def _update_resize_magnifier(self):

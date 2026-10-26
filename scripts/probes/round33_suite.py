@@ -999,6 +999,77 @@ def run(ctx):
     check("Z10a 切文字工具左边缘不变", _x_pen == _x_text)
     check("Z10b 切回画笔左边缘不变", _x_pen == _x_back)
     check("Z10c 文字态确实更宽（用例有效）", _w_text > _w_pen)
+
+    # ---- Z11 拖动/缩放跟手性（2026-10-26 用户反馈"非常不跟手"）----
+    # 根因：每次 mouseMove 都 _update_all() 整屏重绘，1080p 实测 7.7ms/帧
+    # （125% 缩放下更高），叠加事件循环与合成后明显掉帧。
+    # 修复：只重绘旧新选区的并集（_update_sel_dirty），选区外的底图与暗化层
+    # 在拖动期间不变。实测 7.2ms → 2.5ms（dpr=1）/ 11ms → 3.6ms（dpr=1.25）。
+    import time as _time
+
+    _ov2 = OverlayWindow(scr, QPixmap.fromImage(_sample_image(800, 600)), cfg)
+    _ov2.show()
+    app.processEvents()
+    _ov2.start()
+    app.processEvents()
+    _ov2.sel = _QRectF(200, 150, 900, 600)
+    _ov2.finalized = True
+
+    # 1) 结构性断言：拖动一帧的重绘面积必须远小于全屏（证明没退回全量）
+    _areas = []
+    _orig_upd = _ov2.update
+
+    def _spy_upd(r=None):
+        if r is not None and hasattr(r, "width"):
+            _areas.append(r.width() * r.height())
+        return _orig_upd(r) if r is not None else _orig_upd()
+
+    _ov2.update = _spy_upd
+    _ov2._move_sel_to(_QRectF(260, 190, 900, 600))
+    app.processEvents()
+    _ov2.update = _orig_upd
+    _screen_area = _ov2.width() * _ov2.height()
+    check(
+        "Z11a 拖动只重绘局部（<60% 屏幕）",
+        bool(_areas) and max(_areas) < _screen_area * 0.6,
+    )
+
+    # 2) 性能：单帧耗时应明显低于整屏重绘（阈值宽松，只防退回全量级别）
+    _t0 = _time.perf_counter()
+    for _i in range(15):
+        _ov2._move_sel_to(_QRectF(220 + _i * 5, 160 + _i * 3, 900, 600))
+        app.processEvents()
+    _ms_move = (_time.perf_counter() - _t0) / 15 * 1000
+    _t0 = _time.perf_counter()
+    for _i in range(15):
+        _ov2._resize(QPointF(1100 + _i * 3, 750 + _i * 2))
+        app.processEvents()
+    _ms_resize = (_time.perf_counter() - _t0) / 15 * 1000
+    check("Z11b 拖动单帧 < 6ms", _ms_move < 6.0)
+    check("Z11c 缩放单帧 < 6ms", _ms_resize < 6.0)
+
+    # 3) 局部重绘不留残影（工具条移走的旧区域也要被覆盖）
+    _ov2.drag_mode = "move"
+    for _i in range(20):
+        _ov2._move_sel_to(_QRectF(220 + _i * 8, 160 + _i * 4, 900, 600))
+        app.processEvents()
+    _g1 = scr.grabWindow(int(_ov2.winId())).toImage()
+    _ov2.repaint()
+    app.processEvents()
+    from PyQt5.QtTest import QTest as _QT
+
+    _QT.qWait(60)
+    _g2 = scr.grabWindow(int(_ov2.winId())).toImage()
+    _d2 = sum(
+        1
+        for _y in range(_g1.height())
+        for _x in range(_g1.width())
+        if _g1.pixelColor(_x, _y) != _g2.pixelColor(_x, _y)
+    )
+    check("Z11d 局部重绘无残影", _d2 == 0)
+    _ov2.hide()
+    _ov2.deleteLater()
+    app.processEvents()
     _ov.hide()
     _ov.deleteLater()
     app.processEvents()
