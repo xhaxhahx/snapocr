@@ -737,7 +737,7 @@ def run(ctx):
     tbz = EditorToolbar()
     rwz = ResultWindow(cfg=Config())
     z1 = (
-        tbz.btn_copy.text().strip() == "复制为图片"
+        tbz.btn_copy.text().strip() == "复制图片"
         and tbz.btn_copyfile.text().strip() == "复制为jpg文件"
         and rwz.btn_save.text().strip() == "保存"
         and rwz.btn_copyfile.text().strip() == "复制为TXT文件"
@@ -745,7 +745,7 @@ def run(ctx):
     tbz.deleteLater()
     rwz.close()
     rwz.deleteLater()
-    check("Z1 按钮改名(复制为图片/复制为jpg文件/保存)", z1)
+    check("Z1 按钮改名(复制图片/复制为jpg文件/保存)", z1)
 
     from PyQt5.QtWidgets import QPlainTextEdit
 
