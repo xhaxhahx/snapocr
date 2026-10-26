@@ -290,12 +290,18 @@ class OverlayWindow(QWidget):
     def _reposition_toolbar(self, h_override=None):
         """把工具条放到选区下方；空间不足翻到上方，都不够则贴屏幕底边。
 
+        **左边缘锚定**（2026-10-26 用户反馈）：此前按 `sel.right() - 工具条宽度`
+        右对齐，而文字工具会多出字号/字重/字体三个下拉（实测 633 → 882px，
+        宽 249px），左边缘随宽度跳变，点一下「文字」整条工具栏就往左蹿——体验很差。
+        改为左边缘对齐选区左边缘后，宽度变化只向右扩展，左边缘稳定。
+        取舍：选区靠屏幕右侧时仍会被 clamp 推回（否则出屏），此时位置会动。
+
         h_override：展开/折叠动画期间传入"目标总高"，位置一次性按最终高度定点，
         避免动画中途因高度增长而把工具条翻转位置造成抖动。
         """
         ts_w = self.toolbar.width()
         ts_h = self.toolbar.height() if h_override is None else h_override
-        x = self.sel.right() - ts_w
+        x = self.sel.left()
         x = max(4, min(x, self.width() - ts_w - 4))
         y = self.sel.bottom() + 8
         if y + ts_h > self.height() - 4:

@@ -61,6 +61,7 @@ def run(ctx):
     scr = ctx.scr
     check = ctx.check
     skip = ctx.skip
+    cfg = ctx.cfg  # 配置已由主探针重定向到 .tmp，构造窗口可安全复用
     cfg_path = ctx.cfg_path  # 已重定向到 .tmp/probe_config.json
     from snapocr import i18n as _i18n
     from snapocr.tests.selftest import _sample_image
@@ -966,3 +967,38 @@ def run(ctx):
     check("Z9a 色板色谱预置当前色", z9a)
     check("Z9b 色板色相条预置当前色相", z9b)
     check("Z9c 色板高亮当前标准色", z9c)
+
+    # ---- Z10 工具条左边缘稳定（2026-10-26 用户反馈）----
+    # 文字工具会多出字号/字重/字体三个下拉，工具条宽度 633 → 882px。
+    # 旧实现按 sel.right()-宽度 右对齐，左边缘随宽度左移 249px（点「文字」整条工具栏往左蹿）。
+    # 修复：改为左边缘对齐选区左边缘，宽度变化只向右扩展。
+    from PyQt5.QtCore import QRectF as _QRectF
+
+    from snapocr.ui.editor import TOOL_PEN as _TP
+    from snapocr.ui.editor import TOOL_TEXT as _TT
+
+    _ov = OverlayWindow(scr, QPixmap.fromImage(_sample_image(800, 600)), cfg)
+    _ov.show()
+    app.processEvents()
+    _ov.start()
+    app.processEvents()
+    _ov.sel = _QRectF(300, 200, 600, 400)  # 居中，保证不触发 clamp
+    _ov._reposition_toolbar()
+    app.processEvents()
+    _x_pen = _ov.toolbar.x()
+    _w_pen = _ov.toolbar.width()
+    _ov.toolbar.set_tool(_TT)
+    _ov._reposition_toolbar()
+    app.processEvents()
+    _x_text = _ov.toolbar.x()
+    _w_text = _ov.toolbar.width()
+    _ov.toolbar.set_tool(_TP)
+    _ov._reposition_toolbar()
+    app.processEvents()
+    _x_back = _ov.toolbar.x()
+    check("Z10a 切文字工具左边缘不变", _x_pen == _x_text)
+    check("Z10b 切回画笔左边缘不变", _x_pen == _x_back)
+    check("Z10c 文字态确实更宽（用例有效）", _w_text > _w_pen)
+    _ov.hide()
+    _ov.deleteLater()
+    app.processEvents()
