@@ -1099,9 +1099,19 @@ class CanvasWidget(QWidget):
         e.setObjectName("textInput")
         e.setPlaceholderText(tr("text_input_hint"))
         e.setStyleSheet(
-            "QTextEdit#textInput { background: rgba(255,255,255,235); color: %s;"
+            # 透明背景 + 虚线边框（2026-10-26 用户要求）：输入框覆盖在截图上，
+            # 白底会把下方内容糊住，看不清"文字将落在哪"；只留虚线分界即可。
+            # viewport 单独置透明：QTextEdit 是 QAbstractScrollArea，背景画在
+            # viewport 上，只设自身 background 会留一块浅色底。
+            "QTextEdit#textInput { background: transparent; color: %s;"
             " border: 1px dashed %s; font-size: %dpx; padding: 2px;"
-            ' font-family: "%s"; font-weight: %d; }'
+            ' font-family: "%s"; font-weight: %d;'
+            " selection-background-color: rgba(0,120,215,120); }"
+            "QTextEdit#textInput > QWidget { background: transparent; }"
+            # 滚动条在透明背景下是一条突兀的灰条，且输入框只有 3.4 行高，
+            # 内容超出时靠光标跟随即可，不需要滚动条。
+            "QTextEdit#textInput QScrollBar:vertical,"
+            " QTextEdit#textInput QScrollBar:horizontal { width: 0; height: 0; }"
             % (
                 self.color,
                 theme.current().accent_css,

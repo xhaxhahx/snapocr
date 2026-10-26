@@ -1067,6 +1067,45 @@ def run(ctx):
         if _g1.pixelColor(_x, _y) != _g2.pixelColor(_x, _y)
     )
     check("Z11d 局部重绘无残影", _d2 == 0)
+
+    # ---- Z12 文字输入框透明背景（2026-10-26 用户要求）----
+    # 输入框覆盖在截图上，白底会把下方内容糊住、看不出"文字将落在哪"；
+    # 改为透明背景 + 虚线分界，并隐藏滚动条（透明底上的灰条很突兀）。
+    from PyQt5.QtGui import QImage as _QImg
+
+    from snapocr.ui.editor import CanvasWidget as _CW
+
+    _cimg = _QImg(600, 400, _QImg.Format_RGB888)
+    _cimg.fill(_QColor("#336699"))
+    _cw = _CW(_cimg, 1.0, mosaic_block=10)
+    _cw.show()
+    app.processEvents()
+    _cw._open_text_edit(QPointF(100, 100))
+    app.processEvents()
+    from PyQt5.QtTest import QTest as _QT2
+
+    _QT2.qWait(150)  # 等首次绘制完成，否则 grab 到未渲染的画面
+    _te = _cw._text_edit
+    _css = _te.styleSheet() if _te is not None else ""
+    check("Z12a 输入框背景透明", "background: transparent" in _css)
+    check("Z12b 输入框虚线边框", "border: 1px dashed" in _css)
+    check("Z12c 输入框隐藏滚动条", "QScrollBar" in _css and "width: 0" in _css)
+    # 像素级：框内空白行必须与底图同色（避开文字行）
+    if _te is not None:
+        _pg = _cw.grab().toImage()
+        # grab() 返回设备像素图，而 _te 的坐标是逻辑坐标，dpr≠1 时必须换算。
+        # 用图自身的 dpr：cw.dpr 是构造参数（探针传 1.0），未必等于屏幕 dpr。
+        _pdpr = _pg.devicePixelRatio() or 1.0
+        _c = _pg.pixelColor(int((_te.x() + 200) * _pdpr), int((_te.y() + 52) * _pdpr))
+        check(
+            "Z12d 框内透出底图",
+            abs(_c.red() - 0x33) < 12
+            and abs(_c.green() - 0x66) < 12
+            and abs(_c.blue() - 0x99) < 12,
+        )
+    _cw.close()
+    _cw.deleteLater()
+    app.processEvents()
     _ov2.hide()
     _ov2.deleteLater()
     app.processEvents()
