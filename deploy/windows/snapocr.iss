@@ -19,7 +19,9 @@ OutputDir=..\..\dist
 OutputBaseFilename=SnapOCR-{#MyAppVersion}-win64-setup
 Compression=lzma2/max
 SolidCompression=yes
-WizardStyle=modern
+WizardStyle=modern dynamic
+; dynamic：向导配色跟随系统亮/暗主题（Inno Setup 7 新增）。
+; 不加 dynamic 时固定浅色，暗色系统上安装界面会刺眼（2026-10-26 用户反馈）。
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\{#MyAppExeName}
