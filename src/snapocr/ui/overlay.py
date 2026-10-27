@@ -927,8 +927,13 @@ class OverlayWindow(QWidget):
 
     # ---------- 动作 ----------
     def hideEvent(self, ev):
-        # 遮罩被关闭时兜底收掉预览窗，避免孤儿窗口
-        if self._preview is not None and self._preview.isVisible():
+        # 遮罩被关闭时兜底收掉预览窗，避免孤儿窗口——但**钉住态预览窗保留**：
+        # 它已脱离会话（once 模式的进程去留由 previewClosed→_maybe_quit_once 判定）
+        if (
+            self._preview is not None
+            and self._preview.isVisible()
+            and not getattr(self._preview, "pinned", False)
+        ):
             self._preview.close()
         super().hideEvent(ev)
 

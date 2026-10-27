@@ -295,8 +295,10 @@ class PreviewDialog(QWidget):
         self._update_title_icons()
 
     def _update_title_icons(self):
-        """重画三个标题栏图标（图钉/最小化/关闭）——用当前主题色，钉住态变强调色。
+        """重画三个标题栏图标（图钉/最小化/关闭）——用当前主题色。
 
+        钉住态：按钮底变强调色，图钉图标改用 on_accent（强调色上的可读色），
+        否则同色图标在蓝底上不可见（2026-10-27 GUI 实测发现）。
         retheme 在 __init__ 早期（按钮创建前）也会被调：hasattr 守卫跳过。"""
         if not hasattr(self, "btn_pin"):
             return
@@ -305,7 +307,7 @@ class PreviewDialog(QWidget):
         from .icons import pixmap as _icon_pm
 
         t = theme.current()
-        self.btn_pin.setIcon(QIcon(_icon_pm("pin", t.accent_css if self.pinned else t.icon)))
+        self.btn_pin.setIcon(QIcon(_icon_pm("pin", t.on_accent if self.pinned else t.icon)))
         self.btn_min.setIcon(QIcon(_icon_pm("minimize", t.icon)))
         self.btn_close.setIcon(QIcon(_icon_pm("close_line", t.icon)))
 
