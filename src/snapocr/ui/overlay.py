@@ -516,14 +516,20 @@ class OverlayWindow(QWidget):
         p.drawLine(QPointF(cx, cy - 8), QPointF(cx, cy + 8))
 
     def _teardown_canvas(self):
-        """退出编辑态：移除画布与工具条（重新框选/取消时复用）。"""
+        """退出编辑态：移除画布与工具条（重新框选/取消时复用）。
+
+        钉住的预览窗**保留**——只有点标题栏 × 才关闭它（2026-10-28 用户需求）。"""
         if self.canvas is not None:
             self.canvas.hide()
             self.canvas.deleteLater()
             self.canvas = None
         self._hide_resize_magnifier()
         self.toolbar.hide()
-        if self._preview is not None and self._preview.isVisible():
+        if (
+            self._preview is not None
+            and self._preview.isVisible()
+            and not getattr(self._preview, "pinned", False)
+        ):
             self._preview.close()
 
     # ---------- 窗口/控件自动识别 ----------
