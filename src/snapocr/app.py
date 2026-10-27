@@ -22,6 +22,7 @@ from .platform.capture import (
     is_wayland,
 )
 from .ui import icons, theme
+from .ui.preview_dialog import PreviewDialog
 from .ui.result_window import ResultWindow
 from .ui.settings_dialog import SettingsDialog
 from .utils.logger import get_logger
@@ -107,6 +108,7 @@ class CaptureController(QObject):
             ov.selectionMoved.connect(self._on_selection_moved)
             ov.finished.connect(self._on_finished)
             ov.cancelled.connect(self._on_finished)
+            ov.previewClosed.connect(self._maybe_quit_once)
             overlays.append(ov)
         if not overlays:
             self._restore_windows()
@@ -183,6 +185,15 @@ class CaptureController(QObject):
             if self.overlays:
                 return
             if self.result is not None and self.result.isVisible():
+                return
+            # 钉住的预览窗：截图会话已结束，但用户明确要求窗口保留 → 进程必须留着。
+            # 它关闭时 PreviewDialog.closeEvent 发出 closed 信号，宿主在
+            # _result_closed/取消链路之外还需再触发一次本判定——目前由
+            # once 模式的退出前判定（quit 前）兜底覆盖。
+            if any(
+                isinstance(w, PreviewDialog) and w.isVisible() and getattr(w, "pinned", False)
+                for w in QApplication.topLevelWidgets()
+            ):
                 return
             self._flush_clipboard()
             # X11 剪贴板是"所有权"模型：源进程退出即失效，太快退出会粘出空内容

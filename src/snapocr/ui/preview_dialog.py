@@ -5,9 +5,17 @@
 import os
 import time
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QImage, QPainter
+from PyQt5.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..i18n import tr
 from ..paths import pictures_dir
@@ -16,11 +24,129 @@ from . import theme
 MAX_PREVIEW_W, MAX_PREVIEW_H = 640, 420
 
 
+class PreviewCanvas(QWidget):
+    """预览图画布：滚轮缩放 + 图片超出可视区时左键拖动。
+
+    绘制规则（对应 2026-10-27 的需求验收点）：
+
+    - **适配窗口时保持原始纵横比**：基准缩放取 `min(视口宽/图宽, 视口高/图高)`（contain）；
+    - **锚点在左上角**：图片左上角对齐视口左上角，不居中——这样缩放/调整窗口时
+      内容不会左右跳动；
+    - **滚轮以图片为对象缩放**：`zoom` 是相对"适配尺寸"的倍数，范围 [1, 8]，
+      `zoom=1` 即刚好适配；放大后超出部分可拖动查看；
+    - **窗口尺寸变化时图片跟随**：`zoom=1` 时始终重新适配；放大态下保持缩放倍数，
+      只把拖动偏移 clamp 回合法范围（不会出现"拖丢了看不到图"）。
+    """
+
+    MIN_ZOOM = 1.0
+    MAX_ZOOM = 8.0
+    WHEEL_STEP = 1.15
+
+    def __init__(self, image: QImage, parent=None):
+        super().__init__(parent)
+        self._img = image
+        self._zoom = self.MIN_ZOOM
+        self._offset = QPoint(0, 0)
+        self._drag_from = None  # 拖动起点（相对图片左上角的偏移）
+        self.setObjectName("previewView")
+        # QSS 的 background/border 只对"样式化背景"生效，自定义 QWidget 必须显式开启
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumSize(120, 80)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.ArrowCursor)
+
+    # ---------- 几何 ----------
+    def _fit_scale(self) -> float:
+        iw, ih = self._img.width(), self._img.height()
+        if iw <= 0 or ih <= 0 or self.width() <= 0 or self.height() <= 0:
+            return 1.0
+        return min(self.width() / iw, self.height() / ih)
+
+    def draw_size(self) -> QSize:
+        s = self._fit_scale() * self._zoom
+        return QSize(max(1, int(self._img.width() * s)), max(1, int(self._img.height() * s)))
+
+    def _can_pan(self) -> bool:
+        d = self.draw_size()
+        return d.width() > self.width() or d.height() > self.height()
+
+    def _clamp_offset(self):
+        d = self.draw_size()
+        min_x = min(0, self.width() - d.width())
+        min_y = min(0, self.height() - d.height())
+        self._offset.setX(max(min_x, min(0, self._offset.x())))
+        self._offset.setY(max(min_y, min(0, self._offset.y())))
+        self._update_cursor()
+
+    def _update_cursor(self):
+        if self._drag_from is not None:
+            self.setCursor(Qt.ClosedHandCursor)
+        else:
+            self.setCursor(Qt.OpenHandCursor if self._can_pan() else Qt.ArrowCursor)
+
+    # ---------- 绘制 ----------
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, self._zoom < 4.0)
+        d = self.draw_size()
+        p.drawImage(
+            self._offset, self._img.scaled(d, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        )
+        p.end()
+
+    # ---------- 交互 ----------
+    def wheelEvent(self, ev):
+        delta = ev.angleDelta().y()
+        if not delta:
+            return
+        step = self.WHEEL_STEP if delta > 0 else 1.0 / self.WHEEL_STEP
+        new_zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, self._zoom * step))
+        if abs(new_zoom - self._zoom) < 1e-4:
+            ev.accept()
+            return
+        self._zoom = new_zoom
+        self._clamp_offset()
+        self.update()
+        ev.accept()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self._can_pan():
+            self._drag_from = ev.pos() - self._offset
+            self._update_cursor()
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._drag_from is not None:
+            self._offset = ev.pos() - self._drag_from
+            self._clamp_offset()
+            self.update()
+            ev.accept()
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if self._drag_from is not None:
+            self._drag_from = None
+            self._update_cursor()
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
+
+    def resizeEvent(self, ev):
+        # zoom=1 时 draw_size 跟着视口走（自动重新适配）；放大态只需把偏移收回合法范围
+        self._clamp_offset()
+        super().resizeEvent(ev)
+
+
 class PreviewDialog(QWidget):
     copyDone = pyqtSignal()  # 已复制，会话结束
     saveDone = pyqtSignal()  # 已另存，会话结束
     retried = pyqtSignal()  # 重试：回到编辑
     cancelled = pyqtSignal()  # 取消：仅关闭预览
+    closed = pyqtSignal()  # 窗口已关闭（钉住态关闭后宿主需重新判定进程去留）
 
     def __init__(self, image: QImage, cfg, parent=None):
         super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint)
@@ -30,6 +156,8 @@ class PreviewDialog(QWidget):
         self.image = image
         self.cfg = cfg
         self._busy = False
+        # 钉住：会话结束后窗口仍保留（2026-10-27 需求）。不钉住时随任务结束关闭。
+        self.pinned = False
         self.setWindowTitle(tr("preview_title"))
         self.retheme(theme.current())
         theme.manager.changed.connect(self.retheme)
@@ -45,13 +173,17 @@ class PreviewDialog(QWidget):
         head.addWidget(self.title)
         head.addStretch(1)
         head.addWidget(self.meta)
+        self.btn_pin = QPushButton(tr("pin"), objectName="pinBtn")
+        self.btn_pin.setCheckable(True)
+        self.btn_pin.setToolTip(tr("pin_tip"))
+        self.btn_pin.toggled.connect(self._on_pin_toggled)
+        head.addWidget(self.btn_pin)
         root.addLayout(head)
 
-        scaled = self._scaled_pixmap()
-        self.view = QLabel()
-        self.view.setPixmap(scaled)
-        self.view.setFixedSize(scaled.size())
-        self.view.setObjectName("previewView")
+        # 画布自适应窗口（Expanding），最小尺寸沿用旧行为的初始大小；
+        # 图片由 PreviewCanvas 按"保持纵横比 + 左上锚点"绘制，支持滚轮缩放与拖动。
+        self.view = PreviewCanvas(self.image)
+        self.view.setMinimumSize(*self._initial_view_size())
         root.addWidget(self.view, 1)
 
         btns = QHBoxLayout()
@@ -86,6 +218,9 @@ class PreviewDialog(QWidget):
             QPushButton:pressed { background: %(card)s; border: 1px solid %(accent)s;
                                   padding: 6px 14px; }
             QPushButton:disabled { color: %(sub)s; }
+            QPushButton#pinBtn { padding: 3px 10px; font-size: 12px; }
+            QPushButton#pinBtn:checked { background: %(accent)s; border: 1px solid transparent;
+                                         color: %(on_acc)s; font-weight: 600; }
             QPushButton#primary { background: %(accent)s; border: 1px solid transparent;
                                   color: %(on_acc)s; font-weight: 600; }
             QPushButton#primary:hover { background: %(accent_h)s; border: 2px solid %(accent)s;
@@ -104,15 +239,24 @@ class PreviewDialog(QWidget):
             }
         )
 
-    def _scaled_pixmap(self):
-        pm = QPixmap.fromImage(self.image)
-        w, h = pm.width(), pm.height()
-        scale = min(1.0, MAX_PREVIEW_W / max(1, w), MAX_PREVIEW_H / max(1, h))
-        if scale < 1.0:
-            pm = pm.scaled(
-                int(w * scale), int(h * scale), Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-        return pm
+    def _initial_view_size(self):
+        """初始视口尺寸：按 MAX_PREVIEW_W/H 等比适配（预览窗初始大小沿用旧行为）。"""
+        iw, ih = self.image.width(), self.image.height()
+        if iw <= 0 or ih <= 0:
+            return MAX_PREVIEW_W, MAX_PREVIEW_H
+        scale = min(1.0, MAX_PREVIEW_W / iw, MAX_PREVIEW_H / ih)
+        return max(120, int(iw * scale)), max(80, int(ih * scale))
+
+    # ---------- 钉住 ----------
+    def _on_pin_toggled(self, pinned):
+        self.pinned = bool(pinned)
+        self.btn_pin.setText(tr("unpin") if self.pinned else tr("pin"))
+        self.btn_pin.setToolTip(tr("unpin_tip") if self.pinned else tr("pin_tip"))
+
+    def closeEvent(self, ev):
+        """关闭时通知宿主：钉住态下窗口关闭后，once 模式需要重新判定是否退出进程。"""
+        self.closed.emit()
+        super().closeEvent(ev)
 
     # ---------- 展示 ----------
     def show_near(self, screen):

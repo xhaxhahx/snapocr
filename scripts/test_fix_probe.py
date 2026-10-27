@@ -493,7 +493,16 @@ def main():
         "新增配置就位",
         all(k in DEFAULTS for k in ("ocr_max_dim", "ocr_release_after")),
     )
-    check("P3d i18n 无残留 pin", "pin" not in i18n._ZH and "pin" not in i18n._EN)
+    # P3d：pin 键曾因"贴图"功能移除而删除；2026-10-27 预览窗"钉住"功能合法复用，
+    # 断言改为"pin 系列键成对存在且被引用"（不再是残留）
+    check(
+        "P3d i18n pin 键已由钉住功能复用(非残留)",
+        "pin" in i18n._ZH
+        and "unpin" in i18n._ZH
+        and "pin" in i18n._EN
+        and "unpin" in i18n._EN
+        and "pin_tip" in i18n._ZH,
+    )
 
     # ---- P1c bench 参数越界保护 ----
     import snapocr.tests.bench as bench

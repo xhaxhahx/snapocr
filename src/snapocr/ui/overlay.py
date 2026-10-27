@@ -60,6 +60,7 @@ class OverlayWindow(QWidget):
     cancelled = pyqtSignal()  # 用户取消（Esc/右键外/取消按钮）
     finished = pyqtSignal()  # 会话自然结束（完成/复制/保存后）
     selectionMoved = pyqtSignal()  # 选区被移动（用于关闭结果窗等联动）
+    previewClosed = pyqtSignal()  # 钉住的预览窗被关闭（宿主需重新判定进程去留）
 
     def __init__(self, screen, pm, cfg, ocr_busy_signal=None):
         super().__init__(
@@ -986,6 +987,12 @@ class OverlayWindow(QWidget):
         # "绕过识别"（隐私直觉陷阱）；无标注时 composite 与原始裁剪像素一致
         self.ocrRequested.emit(self.composite(), self.global_rect(), self.screen)
 
+    def _on_preview_finished(self, pv):
+        """预览窗完成一次动作（复制/另存）：未钉住则关闭窗口，钉住则保留。"""
+        if not getattr(pv, "pinned", False):
+            pv.close()
+        self.finished.emit()
+
     def _done(self):
         """完成 → 预览确认窗（复制/另存/重试），借鉴 Firefox 预览流。"""
         if self._preview is not None and self._preview.isVisible():
@@ -997,8 +1004,11 @@ class OverlayWindow(QWidget):
         self.canvas._commit_pending_text()
         img = self.composite()
         pv = PreviewDialog(img, self.cfg)
-        pv.copyDone.connect(lambda: (pv.close(), self.finished.emit()))
-        pv.saveDone.connect(lambda: (pv.close(), self.finished.emit()))
+        # 钉住态：动作完成后**不关闭**预览窗，但仍结束截图会话（overlay/画布/引擎全部回收），
+        # 由 PreviewDialog.closed → 宿主判定进程去留（2026-10-27 需求 §5）。
+        pv.copyDone.connect(lambda: self._on_preview_finished(pv))
+        pv.saveDone.connect(lambda: self._on_preview_finished(pv))
+        pv.closed.connect(self.previewClosed.emit)  # 钉住窗关闭后宿主重判进程去留
         pv.retried.connect(lambda: None)  # 关闭预览，回到编辑
         self._preview = pv
         pv.show_near(self.screen)
