@@ -30,6 +30,9 @@ MAG_BOX = 120  # 放大镜边长（逻辑px）
 # 比原先 8 倍（仅采样 15px）能多看到一圈上下文，定位窗口/控件边缘更稳。
 MAG_ZOOM = 5
 SNAP_PX = 8  # 窗口/控件边缘吸附阈值（逻辑px）
+# 移动/缩放的执行节流下限：8ms ≈ 120fps 上限。正常 125Hz 鼠标事件间隔就是 8ms，
+# 因此每帧都会立即执行（跟手）；1000Hz 鼠标最多跳 1 帧。
+MOVE_MIN_INTERVAL = 0.008
 
 
 def _make_cross_cursor():
@@ -112,9 +115,10 @@ class OverlayWindow(QWidget):
         # 单核；同一帧只执行最后一次位置
         self._move_coalesce = QTimer(self)
         self._move_coalesce.setSingleShot(True)
-        self._move_coalesce.setInterval(16)
+        self._move_coalesce.setInterval(int(MOVE_MIN_INTERVAL * 1000))
         self._move_coalesce.timeout.connect(self._apply_pending_move)
         self._pending_move_pos = None
+        self._last_move_t = 0.0  # 上次实际执行移动/缩放的时间戳（节流用）
 
         self._hint_font = QFont()
         self._hint_font.setPixelSize(12)
@@ -560,10 +564,17 @@ class OverlayWindow(QWidget):
         return self._compute_window_rect(pos)
 
     def _snap_target_at(self, pos):
-        """边缘吸附目标：独立节流（与悬停高亮解耦），无则 None。"""
+        """边缘吸附目标：独立节流（与悬停高亮解耦），无则 None。
+
+        拖动/缩放期间节流降到 250ms：`_compute_window_rect` 是同步的
+        EnumWindows + DWM 查询，本机 0.04ms，但 RDP / 慢机可达数毫秒到数十毫秒，
+        每帧探测会让拖动呈现规律性顿挫。拖动中用户主要感知位置而非精确吸附，
+        松手后（drag_mode 为空）自动恢复 120ms 以保证吸附精度。
+        """
 
         now = time.monotonic()
-        if now - self._last_snap_t >= 0.12:
+        interval = 0.25 if self.drag_mode in ("move", "resize") else 0.12
+        if now - self._last_snap_t >= interval:
             self._last_snap_t = now
             self._snap_target = self._compute_window_rect(pos) if pos is not None else None
         return self._snap_target
@@ -618,9 +629,7 @@ class OverlayWindow(QWidget):
             return
         if self.finalized:
             if self.drag_mode in ("move", "resize"):
-                # 帧合并：只记最后一次位置，16ms 定时器到点统一执行（释放时同步补执行）
-                self._pending_move_pos = QPointF(pos)
-                self._move_coalesce.start()
+                self._request_move(QPointF(pos))
             else:
                 self._update_cursor(QPointF(pos))
             return
@@ -689,10 +698,37 @@ class OverlayWindow(QWidget):
             return
         self.update(dirty.toAlignedRect().adjusted(-8, -8, 8, 8))
 
+    def _request_move(self, pos):
+        """请求执行一次移动/缩放：时间戳节流，最多每 MOVE_MIN_INTERVAL 执行一次。
+
+        旧实现每个 move 事件都 `_move_coalesce.start()`——单次定时器被**重置**。
+        125Hz 鼠标（8ms 间隔）下定时器被无限重置、永不触发：实测 8ms 间隔连续
+        20 次 move，选区位置**一次都没变**，拖动中框几乎不动、松手才跳到终点
+        （2026-10-26 客户机"拖动/缩放非常不跟手"的根因，比"迟滞一帧"更严重）。
+
+        现改为：距上次执行 ≥8ms 就**立即执行**（正常鼠标每帧都跟手）；
+        否则挂起最后位置，由定时器补执行（**不重置**，避免再次饿死）。
+        """
+        now = time.monotonic()
+        if now - self._last_move_t >= MOVE_MIN_INTERVAL:
+            self._last_move_t = now
+            self._apply_move_to(pos)
+        else:
+            self._pending_move_pos = pos
+            if not self._move_coalesce.isActive():
+                self._move_coalesce.start()
+
     def _apply_pending_move(self):
-        """执行被合并到本帧的最后一次移动/缩放位置（释放时也同步补执行）。"""
+        """执行挂起的最后一次移动/缩放位置（定时器到期或鼠标释放时）。"""
         pos, self._pending_move_pos = self._pending_move_pos, None
-        if pos is None or not self.finalized or self.drag_mode not in ("move", "resize"):
+        if pos is None:
+            return
+        self._last_move_t = time.monotonic()
+        self._apply_move_to(pos)
+
+    def _apply_move_to(self, pos):
+        """按当前位置执行移动或缩放（不含节流判断）。"""
+        if not self.finalized or self.drag_mode not in ("move", "resize"):
             return
         if self.drag_mode == "move":
             nl = QPointF(pos) + self.move_offset

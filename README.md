@@ -42,7 +42,7 @@ python -m venv .venv
 python scripts\download_models.py        # 构建机联网拉取模型到 resources/models
 dev.bat --selftest                       # 自检（OCR/遮罩/编辑器/剪贴板/UI截图）
 python scripts\test_plan_probe.py        # 回归守住项探针（21 项）
-python scripts\test_fix_probe.py         # 问题总表修复项验证探针（207 项）
+python scripts\test_fix_probe.py         # 问题总表修复项验证探针（209 项）
 deploy\windows\build_all.bat             # 产出绿色版 zip + 安装版 exe
 ```
 
