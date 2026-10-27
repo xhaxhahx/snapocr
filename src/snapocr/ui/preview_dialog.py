@@ -9,6 +9,7 @@ from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QPainter
 from PyQt5.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -149,7 +150,9 @@ class PreviewDialog(QWidget):
     closed = pyqtSignal()  # 窗口已关闭（钉住态关闭后宿主需重新判定进程去留）
 
     def __init__(self, image: QImage, cfg, parent=None):
-        super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint)
+        # 无边框 + 自绘标题栏：钉住按钮要放在最小化左边、与系统按钮同款——
+        # 原生标题栏无法插入自定义按钮（2026-10-27 需求）
+        super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         # 预览窗全是按钮（复制/另存/重试/取消），无输入法需求：禁关联避免任务栏
         # 语言栏闪现导致托盘图标位移（与遮罩同一处理，详见 overlay.py 同处注释）
         self.setAttribute(Qt.WA_InputMethodEnabled, False)
@@ -158,33 +161,61 @@ class PreviewDialog(QWidget):
         self._busy = False
         # 钉住：会话结束后窗口仍保留（2026-10-27 需求）。不钉住时随任务结束关闭。
         self.pinned = False
+        self._drag_pos = None  # 标题栏拖动窗口的起点（全局坐标）
         self.setWindowTitle(tr("preview_title"))
         self.retheme(theme.current())
         theme.manager.changed.connect(self.retheme)
 
         root = QVBoxLayout(self)
         root.setObjectName("previewRoot")
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(8)
+        root.setContentsMargins(1, 1, 1, 1)  # 自绘边框留 1px
+        root.setSpacing(0)
 
-        head = QHBoxLayout()
+        # ---- 自绘标题栏：标题 | 图钉 | 最小化 | 关闭 ----
+        bar_widget = QWidget(objectName="previewTitleBar")
+        bar_widget.setFixedHeight(34)
+        bar_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        bar = QHBoxLayout(bar_widget)
+        bar.setContentsMargins(12, 0, 0, 0)
+        bar.setSpacing(0)
         self.title = QLabel(tr("preview_title"), objectName="previewTitle")
+        self.title.setAttribute(Qt.WA_TransparentForMouseEvents)  # 拖动窗口需要
+        bar.addWidget(self.title)
+        bar.addStretch(1)
         self.meta = QLabel("", objectName="previewMeta")
-        head.addWidget(self.title)
-        head.addStretch(1)
-        head.addWidget(self.meta)
-        self.btn_pin = QPushButton(tr("pin"), objectName="pinBtn")
+        self.meta.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.meta.setStyleSheet("margin-right: 10px;")
+        bar.addWidget(self.meta)
+        self.btn_pin = QPushButton(objectName="titleBtn")
         self.btn_pin.setCheckable(True)
         self.btn_pin.setToolTip(tr("pin_tip"))
         self.btn_pin.toggled.connect(self._on_pin_toggled)
-        head.addWidget(self.btn_pin)
-        root.addLayout(head)
+        bar.addWidget(self.btn_pin)
+        self.btn_min = QPushButton(objectName="titleBtn")
+        self.btn_min.setToolTip(tr("minimize"))
+        self.btn_min.clicked.connect(self.showMinimized)
+        bar.addWidget(self.btn_min)
+        self.btn_close = QPushButton(objectName="titleBtn")
+        self.btn_close.setToolTip(tr("close"))
+        self.btn_close.clicked.connect(self.close)
+        bar.addWidget(self.btn_close)
+        self._update_title_icons()
+        root.addWidget(bar_widget)
+
+        # 标题栏与内容的分隔线
+        sep = QFrame(objectName="titleSep")
+        sep.setFixedHeight(1)
+        root.addWidget(sep)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(13, 11, 13, 11)
+        body.setSpacing(8)
 
         # 画布自适应窗口（Expanding），最小尺寸沿用旧行为的初始大小；
         # 图片由 PreviewCanvas 按"保持纵横比 + 左上锚点"绘制，支持滚轮缩放与拖动。
         self.view = PreviewCanvas(self.image)
         self.view.setMinimumSize(*self._initial_view_size())
-        root.addWidget(self.view, 1)
+        body.addWidget(self.view, 1)
 
         btns = QHBoxLayout()
         self.btn_copy = QPushButton(tr("preview_copy") + "  (Ctrl+C)", objectName="primary")
@@ -194,7 +225,8 @@ class PreviewDialog(QWidget):
         self.btn_cancel = QPushButton(tr("preview_cancel"))
         for b in (self.btn_copy, self.btn_file, self.btn_save, self.btn_retry, self.btn_cancel):
             btns.addWidget(b)
-        root.addLayout(btns)
+        body.addLayout(btns)
+        root.addLayout(body)
 
         self.btn_copy.clicked.connect(self._copy)
         self.btn_file.clicked.connect(self._copy_as_file)
@@ -206,9 +238,11 @@ class PreviewDialog(QWidget):
     def retheme(self, t):
         self.setStyleSheet(
             """
-            #previewRoot { background: %(bg)s; }
+            #previewRoot { background: %(bg)s; border: 1px solid %(border)s; }
+            #previewTitleBar { background: %(bg)s; }
             #previewTitle { font-size: 14px; font-weight: 600; color: %(text)s; }
             #previewMeta { font-size: 12px; color: %(sub)s; }
+            #titleSep { background: %(border)s; }
             #previewView { background: %(card)s; border: 1px solid %(border)s;
                            border-radius: 6px; }
             QPushButton { background: %(card)s; border: 1px solid %(border)s;
@@ -218,9 +252,15 @@ class PreviewDialog(QWidget):
             QPushButton:pressed { background: %(card)s; border: 1px solid %(accent)s;
                                   padding: 6px 14px; }
             QPushButton:disabled { color: %(sub)s; }
-            QPushButton#pinBtn { padding: 3px 10px; font-size: 12px; }
-            QPushButton#pinBtn:checked { background: %(accent)s; border: 1px solid transparent;
-                                         color: %(on_acc)s; font-weight: 600; }
+            /* 标题栏按钮：无边框方块、悬停变色，与系统标题栏按钮同款；
+               图钉钉住态整钮变强调色 */
+            QPushButton#titleBtn { background: transparent; border: none; border-radius: 0;
+                                   padding: 0; }
+            QPushButton#titleBtn { min-width: 46px; max-width: 46px; min-height: 34px;
+                                   max-height: 34px; }
+            QPushButton#titleBtn:hover { background: %(hover)s; border: none; padding: 0; }
+            QPushButton#titleBtn:pressed { background: %(border)s; border: none; padding: 0; }
+            QPushButton#titleBtn:checked { background: %(accent)s; border: none; padding: 0; }
             QPushButton#primary { background: %(accent)s; border: 1px solid transparent;
                                   color: %(on_acc)s; font-weight: 600; }
             QPushButton#primary:hover { background: %(accent_h)s; border: 2px solid %(accent)s;
@@ -238,6 +278,7 @@ class PreviewDialog(QWidget):
                 "on_acc": t.on_accent,
             }
         )
+        self._update_title_icons()
 
     def _initial_view_size(self):
         """初始视口尺寸：按 MAX_PREVIEW_W/H 等比适配（预览窗初始大小沿用旧行为）。"""
@@ -250,8 +291,49 @@ class PreviewDialog(QWidget):
     # ---------- 钉住 ----------
     def _on_pin_toggled(self, pinned):
         self.pinned = bool(pinned)
-        self.btn_pin.setText(tr("unpin") if self.pinned else tr("pin"))
         self.btn_pin.setToolTip(tr("unpin_tip") if self.pinned else tr("pin_tip"))
+        self._update_title_icons()
+
+    def _update_title_icons(self):
+        """重画三个标题栏图标（图钉/最小化/关闭）——用当前主题色，钉住态变强调色。
+
+        retheme 在 __init__ 早期（按钮创建前）也会被调：hasattr 守卫跳过。"""
+        if not hasattr(self, "btn_pin"):
+            return
+        from PyQt5.QtGui import QIcon
+
+        from .icons import pixmap as _icon_pm
+
+        t = theme.current()
+        self.btn_pin.setIcon(QIcon(_icon_pm("pin", t.accent_css if self.pinned else t.icon)))
+        self.btn_min.setIcon(QIcon(_icon_pm("minimize", t.icon)))
+        self.btn_close.setIcon(QIcon(_icon_pm("close_line", t.icon)))
+
+    def mousePressEvent(self, ev):
+        # 标题栏区域（顶部 40px 内且不在按钮上）按下 → 开始拖动窗口
+        if ev.button() == Qt.LeftButton and ev.pos().y() <= 40:
+            w = self.childAt(ev.pos())
+            if not isinstance(w, QPushButton):
+                self._drag_pos = ev.globalPos() - self.frameGeometry().topLeft()
+                return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._drag_pos is not None and ev.buttons() & Qt.LeftButton:
+            self.move(ev.globalPos() - self._drag_pos)
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        self._drag_pos = None
+        super().mouseReleaseEvent(ev)
+
+    def mouseDoubleClickEvent(self, ev):
+        # 双击标题栏 = 切换最大化（与系统标题栏习惯一致）
+        if ev.pos().y() <= 40 and not isinstance(self.childAt(ev.pos()), QPushButton):
+            self.showNormal() if self.isMaximized() else self.showMaximized()
+            return
+        super().mouseDoubleClickEvent(ev)
 
     def closeEvent(self, ev):
         """关闭时通知宿主：钉住态下窗口关闭后，once 模式需要重新判定是否退出进程。"""

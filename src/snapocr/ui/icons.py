@@ -242,6 +242,31 @@ def _draw(name, color, size):
         p.setBrush(QColor("#0078D4"))
         p.drawEllipse(QPointF(31 * s, 30 * s), 2.5 * s, 2.5 * s)
         p.restore()
+    elif name == "pin":  # 图钉（45° 斜置）：针尖朝下、钉帽+侧耳；倾斜态=未钉住
+        p.save()
+        p.translate(32 * s, 32 * s)
+        p.rotate(-40)
+        p.translate(-32 * s, -32 * s)
+        # 针尖（帽下延伸出的细线）
+        p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(32 * s, 34 * s), QPointF(32 * s, 52 * s))
+        # 钉帽（圆角矩形主体）
+        p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(QRectF(24 * s, 14 * s, 16 * s, 20 * s), 4 * s, 4 * s)
+        # 侧耳横杆
+        p.drawLine(QPointF(18 * s, 22 * s), QPointF(46 * s, 22 * s))
+        p.restore()
+    elif name == "minimize":  # 最小化：单条下横线（与系统标题栏按钮一致）
+        p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.FlatCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(20 * s, 36 * s), QPointF(44 * s, 36 * s))
+    elif name == "close_line":  # 关闭：×（细线，与标题栏按钮一致；区别于 cancel 的粗叉）
+        p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawLine(QPointF(21 * s, 21 * s), QPointF(43 * s, 43 * s))
+        p.drawLine(QPointF(43 * s, 21 * s), QPointF(21 * s, 43 * s))
     else:  # 兜底圆点
         p.setBrush(QColor(color))
         p.drawEllipse(QRectF(16 * s, 16 * s, 32 * s, 32 * s))
