@@ -242,22 +242,28 @@ def _draw(name, color, size):
         p.setBrush(QColor("#0078D4"))
         p.drawEllipse(QPointF(31 * s, 30 * s), 2.5 * s, 2.5 * s)
         p.restore()
-    elif name == "pin":  # 图钉（45° 斜置）：针尖朝下、钉帽+侧耳；倾斜态=未钉住
-        p.save()
-        p.translate(32 * s, 32 * s)
-        p.rotate(-40)
-        p.translate(-32 * s, -32 * s)
-        # 针尖（帽下延伸出的细线）
-        p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.RoundCap))
+    elif name == "pin":  # 图钉（正视、竖直朝下）：梯形钉身 + 底横线 + 中央竖针
+        # 形状参照用户提供的标准图钉样图（2026-10-28）：上宽下窄的梯形轮廓，
+        # 底边一条横线，中针从横线中点垂下
+        pen_w = 3.0 * s
+        p.setPen(QPen(QColor(color), pen_w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(Qt.NoBrush)
-        p.drawLine(QPointF(32 * s, 34 * s), QPointF(32 * s, 52 * s))
-        # 钉帽（圆角矩形主体）
-        p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(QRectF(24 * s, 14 * s, 16 * s, 20 * s), 4 * s, 4 * s)
-        # 侧耳横杆
-        p.drawLine(QPointF(18 * s, 22 * s), QPointF(46 * s, 22 * s))
-        p.restore()
+        # 梯形钉身：上边 (22,14)-(42,14)，下边 (28,34)-(36,34)（上宽下窄）
+        p.drawPolyline(
+            QPolygonF(
+                [
+                    QPointF(22 * s, 14 * s),
+                    QPointF(42 * s, 14 * s),
+                    QPointF(36 * s, 34 * s),
+                    QPointF(28 * s, 34 * s),
+                    QPointF(22 * s, 14 * s),
+                ]
+            )
+        )
+        # 底部横线（比梯形下底更宽）
+        p.drawLine(QPointF(22 * s, 34 * s), QPointF(42 * s, 34 * s))
+        # 中央竖针
+        p.drawLine(QPointF(32 * s, 34 * s), QPointF(32 * s, 50 * s))
     elif name == "minimize":  # 最小化：单条下横线（与系统标题栏按钮一致）
         p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.FlatCap))
         p.setBrush(Qt.NoBrush)
