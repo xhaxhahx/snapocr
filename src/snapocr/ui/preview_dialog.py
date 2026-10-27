@@ -145,6 +145,7 @@ class PreviewCanvas(QWidget):
 class PreviewDialog(QWidget):
     copyDone = pyqtSignal()  # 已复制，会话结束
     saveDone = pyqtSignal()  # 已另存，会话结束
+    finished = pyqtSignal()  # 最小化按钮：结束会话（宿主按 pinned 决定预览窗去留）
     retried = pyqtSignal()  # 重试：回到编辑
     cancelled = pyqtSignal()  # 取消：仅关闭预览
     closed = pyqtSignal()  # 窗口已关闭（钉住态关闭后宿主需重新判定进程去留）
@@ -193,7 +194,7 @@ class PreviewDialog(QWidget):
         bar.addWidget(self.btn_pin)
         self.btn_min = QPushButton(objectName="titleBtn")
         self.btn_min.setToolTip(tr("minimize"))
-        self.btn_min.clicked.connect(self.showMinimized)
+        self.btn_min.clicked.connect(self._minimize_or_finish)
         bar.addWidget(self.btn_min)
         self.btn_close = QPushButton(objectName="titleBtn")
         self.btn_close.setToolTip(tr("close"))
@@ -293,6 +294,14 @@ class PreviewDialog(QWidget):
         self.pinned = bool(pinned)
         self.btn_pin.setToolTip(tr("unpin_tip") if self.pinned else tr("pin_tip"))
         self._update_title_icons()
+
+    def _minimize_or_finish(self):
+        """点最小化 = 结束截图会话（遮罩/画布回收）：钉住窗保留在屏上，未钉住则关闭。
+
+        不做真最小化——无边框窗最小化后没有任务栏按钮且遮罩会挡住桌面（2026-10-28
+        GUI 实测），用户会被困在暗化屏幕外；结束会话与钉住语义一致。
+        两种情况都发 finished（宿主按 pinned 决定预览窗去留，见 overlay._on_preview_finished）。"""
+        self.finished.emit()
 
     def _update_title_icons(self):
         """重画三个标题栏图标（图钉/最小化/关闭）——用当前主题色。

@@ -1019,6 +1019,9 @@ class OverlayWindow(QWidget):
         # 由 PreviewDialog.closed → 宿主判定进程去留（2026-10-27 需求 §5）。
         pv.copyDone.connect(lambda: self._on_preview_finished(pv))
         pv.saveDone.connect(lambda: self._on_preview_finished(pv))
+        # 最小化按钮 = 结束会话：_on_preview_finished 按 pinned 决定预览窗去留
+        # （钉住保留在屏，未钉关闭），遮罩与画布由 finished 链路回收。
+        pv.finished.connect(lambda: self._on_preview_finished(pv))
         pv.closed.connect(self.previewClosed.emit)  # 钉住窗关闭后宿主重判进程去留
         pv.retried.connect(lambda: None)  # 关闭预览，回到编辑
         self._preview = pv
