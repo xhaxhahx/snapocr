@@ -329,7 +329,7 @@ def run(ctx):
         return _orig_upd(r) if r is not None else _orig_upd()
 
     _ov2.update = _spy_upd
-    _ov2._move_sel_to(_QRectF(260, 190, 900, 600))
+    _ov2._move_sel_to(QPointF(260, 190))
     app.processEvents()
     _ov2.update = _orig_upd
     _screen_area = _ov2.width() * _ov2.height()
@@ -341,7 +341,7 @@ def run(ctx):
     # 2) 性能：单帧耗时应明显低于整屏重绘（阈值宽松，只防退回全量级别）
     _t0 = _time.perf_counter()
     for _i in range(15):
-        _ov2._move_sel_to(_QRectF(220 + _i * 5, 160 + _i * 3, 900, 600))
+        _ov2._move_sel_to(QPointF(220 + _i * 5, 160 + _i * 3))
         app.processEvents()
     _ms_move = (_time.perf_counter() - _t0) / 15 * 1000
     _t0 = _time.perf_counter()
@@ -355,7 +355,7 @@ def run(ctx):
     # 3) 局部重绘不留残影（工具条移走的旧区域也要被覆盖）
     _ov2.drag_mode = "move"
     for _i in range(20):
-        _ov2._move_sel_to(_QRectF(220 + _i * 8, 160 + _i * 4, 900, 600))
+        _ov2._move_sel_to(QPointF(220 + _i * 8, 160 + _i * 4))
         app.processEvents()
     _g1 = scr.grabWindow(int(_ov2.winId())).toImage()
     _ov2.repaint()
@@ -552,4 +552,52 @@ def run(ctx):
     check("Z14c3 停顿后位移归位并重建", _cw14b._layer_offset.isNull() and not _cw14b._px_stale)
     _cw14b.close()
     _cw14b.deleteLater()
+    app.processEvents()
+
+    # ---- Z15 重新框选后工具条跟随（2026-10-27 用户反馈）----
+    # 拖动选区后不退出、立即左键重新框选：工具条已是展开态，而 `_animate_rowb`
+    # 在 `start == target` 时直接 return，不重定位 → 操作栏停在旧选区位置。
+    from PyQt5.QtCore import QEvent as _QE15
+    from PyQt5.QtGui import QMouseEvent as _QM15
+
+    _W15, _H15 = scr.size().width(), scr.size().height()
+    _dpr15 = scr.devicePixelRatio()
+
+    def _ev15(_t, _p, _btn=Qt.LeftButton):
+        return _QM15(
+            _t,
+            _p,
+            _p,
+            _btn,
+            Qt.LeftButton if _t != _QE15.MouseButtonRelease else Qt.NoButton,
+            Qt.NoModifier,
+        )
+
+    _ov15 = OverlayWindow(
+        scr,
+        QPixmap.fromImage(_sample_image(int(_W15 * _dpr15), int(_H15 * _dpr15))),
+        cfg,
+    )
+    _ov15.show()
+    app.processEvents()
+    _ov15.start()
+    app.processEvents()
+
+    def _box15(_a, _b):
+        _ov15.mousePressEvent(_ev15(_QE15.MouseButtonPress, _a))
+        _ov15.mouseMoveEvent(_ev15(_QE15.MouseMove, _b))
+        _ov15.mouseReleaseEvent(_ev15(_QE15.MouseButtonRelease, _b))
+        _QT14.qWait(340)
+        return _ov15.toolbar.x(), _ov15.toolbar.y(), _ov15.toolbar.height()
+
+    _box15(QPointF(200, 100), QPointF(700, 260))
+    _tx, _ty, _th = _box15(QPointF(300, 420), QPointF(800, 580))
+    check(
+        "Z15a 重新框选后工具条跟随新选区",
+        abs(_ty - (int(_ov15.sel.bottom()) + 8)) <= 14 and abs(_tx - int(_ov15.sel.left())) <= 14,
+    )
+    _tx2, _ty2, _th2 = _box15(QPointF(300, _H15 - 200), QPointF(900, _H15 - 20))
+    check("Z15b 贴底框选工具条翻到选区上方", _ty2 + _th2 <= int(_ov15.sel.top()) + 6)
+    _ov15.hide()
+    _ov15.deleteLater()
     app.processEvents()

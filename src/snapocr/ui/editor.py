@@ -371,6 +371,15 @@ class EditorToolbar(QWidget):
         target = full if exp else 0
         start = self.rowB_widget.maximumHeight()
         if start == target:
+            # 已处于目标状态：尺寸不会再变，但**选区可能刚换过**——例如拖动选区后
+            # 不退出、立即重新框选，此时工具条已是展开态，原先直接 return 会让它
+            # 停在旧选区的位置上（2026-10-27 用户反馈截图：选区在下方、操作栏在上方）。
+            # 这里按当前（=最终）尺寸重定位一次，位置才对得上。
+            p = self.parent()
+            # 构造期（EditorToolbar.__init__ 里就调 set_expanded）父窗口的 toolbar
+            # 还没赋值，此时不能重定位——用 "父窗口的 toolbar 就是自己" 作为就绪判据。
+            if p is not None and getattr(p, "toolbar", None) is self:
+                p._reposition_toolbar()
             return
         if not animate:
             self.rowB_widget.setMaximumHeight(target)
