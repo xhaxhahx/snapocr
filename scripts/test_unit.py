@@ -230,6 +230,47 @@ def test_magnifier_rect_flip_bottom():
     check("放大镜-贴下翻转", r.bottom() <= 600, r)
 
 
+def test_color_picker_reexport_identity():
+    """拆分后 ui.editor 的重导出必须与 ui.color_picker 是**同一对象**。
+
+    探针与旧调用方仍从 `ui.editor` 导入 COLORS / STANDARD_COLORS /
+    ColorPickerPopup；若两处各自复制一份，调色板会出现"改了不生效"的幽灵 bug。
+    """
+    from snapocr.ui import color_picker, editor
+
+    check(
+        "拆分重导出：STANDARD_COLORS 同一对象",
+        editor.STANDARD_COLORS is color_picker.STANDARD_COLORS,
+    )
+    check("拆分重导出：COLORS 同一对象", editor.COLORS is color_picker.COLORS)
+    check(
+        "拆分重导出：ColorPickerPopup 同一类",
+        editor.ColorPickerPopup is color_picker.ColorPickerPopup,
+    )
+
+
+def test_sel_dirty_covers_both_rects():
+    """局部重绘区域必须同时覆盖旧、新选区，且上方留出尺寸标签余量。"""
+    _qapp()
+    from PyQt5.QtCore import QRect, QRectF
+
+    from snapocr.ui.overlay import OverlayWindow
+
+    ov = OverlayWindow.__new__(OverlayWindow)
+    ov.width = lambda: 1000
+    ov.height = lambda: 800
+    ov.rect = lambda: QRect(0, 0, 1000, 800)
+    caught = []
+    ov.update = lambda r: caught.append(r)
+    old = QRectF(100, 100, 200, 150)
+    new = QRectF(400, 300, 200, 150)
+    OverlayWindow._update_sel_dirty(ov, old, new)
+    r = caught[0] if caught else QRectF()
+    check("局部重绘覆盖旧选区", r.contains(old.toAlignedRect()), r)
+    check("局部重绘覆盖新选区", r.contains(new.toAlignedRect()), r)
+    check("局部重绘上方留标签余量", r.top() <= old.top() - 30, r)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     print("== 单元测试（%d 项）==" % len(tests))

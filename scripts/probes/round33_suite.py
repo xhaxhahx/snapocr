@@ -172,17 +172,22 @@ def run(ctx):
         a9_click == 0 and len(fired) == 1,
     )
 
-    # ---- C3 移动按帧合并：事件后未即时生效、释放即定格最后位置 ----
+    # ---- C3 移动节流：≥8ms 立即生效、<8ms 合并、释放定格最后位置 ----
+    # 旧实现是 16ms 单次定时器 + 每次 start() 重置，125Hz 鼠标下定时器永不触发
+    # （拖动中框不动，2026-10-26 客户机反馈）。现改为时间戳节流，断言随之更新。
     ov9.sel = QRectF(100, 100, 200, 150)
     left_before = ov9.sel.left()
     ov9.mousePressEvent(_press(center))
+    ov9._last_move_t = 0.0  # 清掉上一次拖动的时间戳，确保首次 move 不被节流
     ov9.mouseMoveEvent(_move(QPointF(260, 210)))
-    c3_pending = ov9.sel.left() == left_before and ov9._pending_move_pos is not None
-    ov9.mouseReleaseEvent(_release(QPointF(260, 210)))
-    # move_offset=(-50,-50)：释放点 (260,210) → 左上角 (210,160)
+    c3_immediate = ov9.sel.left() != left_before  # 新行为：立即生效
+    ov9.mouseMoveEvent(_move(QPointF(270, 220)))  # 紧接着（<8ms）→ 应被挂起
+    c3_coalesced = ov9._pending_move_pos is not None
+    ov9.mouseReleaseEvent(_release(QPointF(270, 220)))
+    # move_offset=(-50,-50)：释放点 (270,220) → 左上角 (220,170)
     check(
-        "C3 移动合并到帧/释放定格生效",
-        c3_pending and ov9.sel.left() == 210 and ov9._pending_move_pos is None,
+        "C3 移动即时生效/8ms内合并/释放定格",
+        c3_immediate and c3_coalesced and ov9.sel.left() == 220 and ov9._pending_move_pos is None,
     )
     ov9._teardown_canvas()
     ov9.deleteLater()
