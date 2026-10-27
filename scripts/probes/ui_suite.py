@@ -12,7 +12,7 @@
 import os
 
 from PyQt5.QtCore import QPointF, Qt
-from PyQt5.QtGui import QFont, QImage, QPixmap
+from PyQt5.QtGui import QColor, QFont, QImage, QPixmap
 
 from snapocr import i18n as _i18n
 from snapocr.config import Config
@@ -460,4 +460,96 @@ def run(ctx):
     # 在探针的合成事件下不稳定（同一代码实测 0~8 次变化），守护它只会产生误报。
     _ov3.hide()
     _ov3.deleteLater()
+    app.processEvents()
+
+    # ---- Z14 举一反三：同类"高频事件 + 全量重算"缺陷（2026-10-27）----
+    # 与 _move_coalesce 同源的三处：马赛克底图冻结、流式文本 O(n²)、笔画层每帧重建。
+    import time as _t14
+
+    from PyQt5.QtGui import QImage as _QImg14
+
+    from snapocr.ui.editor import TOOL_MOSAIC as _TM14
+
+    class _Ev14:
+        def __init__(self, _p):
+            self._p = _p
+
+        def pos(self):
+            return self._p
+
+        def button(self):
+            return Qt.LeftButton
+
+        def buttons(self):
+            return Qt.LeftButton
+
+    # a) 马赛克：换底图后（全图重建未跟上）画面必须显示新内容，而不是冻结旧内容
+    _b14 = _QImg14(400, 300, _QImg14.Format_RGB888)
+    _b14.fill(QColor("#ff0000"))
+    _cw14 = CanvasWidget(_b14, 1.0, mosaic_block=20)
+    _cw14.show()
+    app.processEvents()
+    _cw14.set_tool(_TM14)
+    _cw14.mousePressEvent(_Ev14(QPointF(150, 120)))
+    _cw14.mouseMoveEvent(_Ev14(QPointF(250, 180)))
+    _cw14.mouseReleaseEvent(_Ev14(QPointF(250, 180)))
+    from PyQt5.QtTest import QTest as _QT14
+
+    _QT14.qWait(200)
+    _g14 = _QImg14(400, 300, _QImg14.Format_RGB888)
+    _g14.fill(QColor("#00ff00"))
+    _cw14.set_base(_g14)  # 拖动一帧：底图换绿，全图 _pixelated 仍是旧的
+    _QT14.qWait(60)
+    _img14 = _cw14.grab().toImage()
+    _d14 = _img14.devicePixelRatio() or 1.0
+    _pc = _img14.pixelColor(int(200 * _d14), int(150 * _d14))
+    check("Z14a 马赛克随底图更新（不冻结）", _pc.green() > 100 and _cw14._px_stale)
+    _cw14.close()
+    _cw14.deleteLater()
+    app.processEvents()
+
+    # b) 流式文本：300 行累计必须远低于 O(n²) 基线（改前 370ms）
+    _rw14 = ResultWindow(cfg=Config())
+    _rw14.show()
+    app.processEvents()
+    _rw14._stream_lines = []
+    _rw14.text.setPlainText("")
+    _rw14._last_stream_render = 0.0
+    _t14a = _t14.perf_counter()
+    for _i in range(300):
+        _rw14.stream_line("第 %d 行识别文本示例 ABC" % _i, _i + 1, 300)
+    _ms14 = (_t14.perf_counter() - _t14a) * 1000
+    _lines14 = _rw14.text.toPlainText().count("\n") + 1
+    check("Z14b 300 行流式 < 60ms", _ms14 < 60)
+    check("Z14b2 末行强制渲染（内容完整）", _lines14 >= 300)
+    _rw14.close()
+    _rw14.deleteLater()
+    app.processEvents()
+
+    # c) 笔画层：拖动期间只累积位移、不重建；停顿后归位并重建
+    _cw14b = CanvasWidget(_QImg14(600, 400, _QImg14.Format_RGB888), 1.0, mosaic_block=20)
+    _cw14b.base.fill(QColor("#ffffff"))
+    _cw14b.show()
+    app.processEvents()
+    _cw14b.set_tool(TOOL_PEN)
+    _cw14b.color = "#ff0000"
+    _cw14b.line_width = 12
+    _cw14b.mousePressEvent(_Ev14(QPointF(100, 100)))
+    _cw14b.mouseMoveEvent(_Ev14(QPointF(200, 100)))
+    _cw14b.mouseReleaseEvent(_Ev14(QPointF(200, 100)))
+    _QT14.qWait(100)
+    _cw14b.set_base(_QImg14(600, 400, _QImg14.Format_RGB888))
+    _cw14b.base.fill(QColor("#ffffff"))
+    _cw14b.shift_strokes(50.0, 40.0)
+    _QT14.qWait(50)
+    _moved14 = not _cw14b._layer_offset.isNull()
+    _img14b = _cw14b.grab().toImage()
+    _d14b = _img14b.devicePixelRatio() or 1.0
+    _pc2 = _img14b.pixelColor(int(200 * _d14b), int(140 * _d14b))
+    check("Z14c 拖动中笔画层只位移不重建", _moved14)
+    check("Z14c2 位移后笔画画在新位置", _pc2.red() > 180 and _pc2.green() < 90)
+    _QT14.qWait(260)
+    check("Z14c3 停顿后位移归位并重建", _cw14b._layer_offset.isNull() and not _cw14b._px_stale)
+    _cw14b.close()
+    _cw14b.deleteLater()
     app.processEvents()

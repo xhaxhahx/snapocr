@@ -686,6 +686,11 @@ class CanvasWidget(QWidget):
         # 因此只擦掉笔刷覆盖到的像素，而不是整条笔画（底图不受影响）。
         self._layer = None
         self._layer_valid = False
+        # 拖动/缩放选区期间的笔画层累积位移（设备像素）。
+        # 重建 40 笔的 _layer 实测 10.1ms/次（20 笔仅 1.2ms，非线性），
+        # 每帧重建会把拖动单帧推到 ~15.6ms；改为只累积位移、平移绘制，
+        # 停顿 120ms 后由 _px_timer 统一重建（边缘缺的一窄条肉眼不可见）。
+        self._layer_offset = QPointF(0.0, 0.0)
         self._px_timer = QTimer(self)  # 马赛克底图重建防抖（缩放拖动时高频触发）
         self._px_timer.setSingleShot(True)
         self._px_timer.setInterval(120)
@@ -694,6 +699,7 @@ class CanvasWidget(QWidget):
         self.setFocusPolicy(Qt.ClickFocus)
         # 马赛克底图首建走 120ms 防抖（与 set_base 同路）：4K 选区实测同步构建
         # 40.5ms，卡在 _finalize（松手→编辑态）关键路径上；延后一拍无感（§33.2 C2）
+        self._px_stale = True  # True = _pixelated 与当前 base 不同步（需局部像素化兜底）
         self._px_timer.start()
         self.setFixedSize(
             QSize(int(base_img.width() / self.dpr), int(base_img.height() / self.dpr))
@@ -704,7 +710,11 @@ class CanvasWidget(QWidget):
         """取景框语义：选区移动/缩放时替换底图（尺寸随之自适应）。"""
         self.base = img
         self.setFixedSize(QSize(int(img.width() / self.dpr), int(img.height() / self.dpr)))
-        self._px_timer.start()  # 防抖：拖动中沿用旧底图，停顿后再重建
+        # 全图重建有 120ms 防抖（4K 选区约 40ms，拖动中每帧重建会卡）；
+        # 防抖期间用 _draw_mosaic_region 对笔画包围盒做局部像素化兜底，
+        # 否则马赛克会冻结在拖动起点的旧内容上（2026-10-27 举一反三发现）。
+        self._px_stale = True
+        self._px_timer.start()
         self.update()
 
     def shift_strokes(self, dx_dev: float, dy_dev: float):
@@ -726,7 +736,10 @@ class CanvasWidget(QWidget):
                 s["path"].translate(dx_dev, dy_dev)
             elif k == "text":
                 s["pos"] = QPointF(s["pos"].x() + dx_dev, s["pos"].y() + dy_dev)
-        self._rebuild_layer()
+        # 不立即重建 _layer（40 笔 10.1ms/次，拖动每帧重建会掉帧）：
+        # 累积位移让 paintEvent 平移绘制，停顿后由 _px_timer 统一重建。
+        self._layer_offset += QPointF(dx_dev, dy_dev)
+        self._px_timer.start()
         self.update()
 
     def _ensure_layer(self):
@@ -736,12 +749,43 @@ class CanvasWidget(QWidget):
 
     def _rebuild_layer(self):
         self._ensure_layer()
+        self._layer_offset = QPointF(0.0, 0.0)
         self._layer.fill(Qt.transparent)
         lp = QPainter(self._layer)
         lp.setRenderHint(QPainter.Antialiasing, True)
         for s in self.strokes:
             self._draw_stroke(lp, s)
         lp.end()
+
+    def _draw_mosaic_region(self, p, s):
+        """底图刚换、全图 `_pixelated` 还没跟上时的兜底绘制（拖动/缩放中）。
+
+        只对本笔画的包围盒做像素化：区域通常几百像素见方，成本 1~2ms，
+        远低于全图重建的 ~40ms（4K 选区）。这样拖动时马赛克能跟着底图
+        正确移动，而不是冻结在拖动起点的旧内容上。
+
+        调用点位于 `paintEvent` 的 `p.scale(1/dpr)` 之后，坐标是**设备像素**。
+        """
+        path = QPainterPath(s["path"])
+        path.setFillRule(Qt.WindingFill)
+        bbox = path.boundingRect().toAlignedRect().intersected(self.base.rect())
+        if bbox.isEmpty():
+            return
+        block = max(2, int(self.mosaic_block))
+        src = self.base.copy(bbox)
+        small = src.scaled(
+            max(1, bbox.width() // block),
+            max(1, bbox.height() // block),
+            Qt.IgnoreAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        tile = small.scaled(
+            bbox.width(), bbox.height(), Qt.IgnoreAspectRatio, Qt.FastTransformation
+        )
+        p.save()
+        p.setClipPath(path, Qt.IntersectClip)
+        p.drawImage(bbox.topLeft(), tile)
+        p.restore()
 
     def _rebuild_pixelated(self):
         try:
@@ -756,6 +800,9 @@ class CanvasWidget(QWidget):
             self._pixelated = small.scaled(w, h, Qt.IgnoreAspectRatio, Qt.FastTransformation)
         except Exception:
             self._pixelated = None
+        self._px_stale = False
+        if not self._layer_offset.isNull():
+            self._rebuild_layer()  # 位移已归位：把笔画画到最终坐标上
         self.update()  # 防抖重建后重绘：首建/换底图后让马赛克笔画立即可见
 
     def set_tool(self, t):
@@ -867,7 +914,11 @@ class CanvasWidget(QWidget):
         # 保证实时预览的墨迹落点与指针重合（WYSIWYG）。render_to_image 为设备空间，不受影响。
         p.scale(1.0 / self.dpr, 1.0 / self.dpr)
         if self._layer is not None:
-            p.drawPixmap(0, 0, self._layer)
+            if self._layer_offset.isNull():
+                p.drawPixmap(0, 0, self._layer)
+            else:
+                # 拖动/缩放中：笔画层按累积位移平移绘制（松手后重建归位）
+                p.drawPixmap(self._layer_offset, self._layer)
         if self._current is not None:
             self._draw_stroke(p, self._current)
         p.end()
@@ -913,7 +964,8 @@ class CanvasWidget(QWidget):
                 elif s["shape"] == "ellipse":
                     p.drawEllipse(r)
         elif kind == "mosaic":
-            if self._pixelated is None:
+            if self._px_stale or self._pixelated is None:
+                self._draw_mosaic_region(p, s)  # 底图刚换：局部像素化兜底
                 return
             p.save()
             path = QPainterPath(s["path"])
