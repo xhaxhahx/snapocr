@@ -853,3 +853,33 @@ def run(ctx):
     _pv19.close()
     _pv19.deleteLater()
     app.processEvents()
+
+    # ---- Z20 预览窗自绘标题栏：图钉在最小化左边 + 最大化（2026-10-28 用户要求）----
+    # 原生标题栏插不进自定义按钮，只能自绘；顺序必须是 图钉→最小化→最大化→关闭。
+    _pv20 = _PD16(_img16, cfg)
+    _pv20.show()
+    _QT14.qWait(120)
+    check(
+        "Z20a 图钉在最小化左边",
+        _pv20.btn_pin.x() < _pv20.btn_min.x() < _pv20.btn_max.x() < _pv20.btn_close.x(),
+    )
+    check(
+        "Z20b 标题栏四按钮图标齐全",
+        all(
+            not b.icon().isNull()
+            for b in (_pv20.btn_pin, _pv20.btn_min, _pv20.btn_max, _pv20.btn_close)
+        ),
+    )
+    _pv20._toggle_max()
+    _QT14.qWait(120)
+    _maxed20 = _pv20.isMaximized()
+    _restore_tip = _pv20.btn_max.toolTip()
+    _pv20._toggle_max()
+    _QT14.qWait(100)
+    check(
+        "Z20c 最大化可切换且图标/提示随态变化",
+        _maxed20 and _restore_tip == "还原" and not _pv20.isMaximized(),
+    )
+    _pv20.close()
+    _pv20.deleteLater()
+    app.processEvents()

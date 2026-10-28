@@ -5,7 +5,7 @@
 import os
 import time
 
-from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QPainter
 from PyQt5.QtWidgets import (
     QApplication,
@@ -162,11 +162,11 @@ class PreviewDialog(QWidget):
     closed = pyqtSignal()  # 窗口已关闭（钉住态关闭后宿主需重新判定进程去留）
 
     def __init__(self, image: QImage, cfg, parent=None):
-        # 原生标题栏（不用 Frameless）：系统自带最小化/最大化/关闭，明暗主题随
-        # `theme.apply_window_chrome` 一并适配——与 OCR 结果窗一致的窗口外观
-        # （2026-10-28 用户要求"照搬结果窗的颜色与边框逻辑，标题栏要有最大化"）。
+        # 自绘标题栏（Frameless）：图钉必须落在**最小化按钮左边**，而系统原生标题栏
+        # 无法插入自定义按钮（2026-10-28 用户要求）。三个系统按钮自己画、自己实现，
+        # 配色沿用结果窗的 token（t.bg/t.text/t.hover），明暗主题一致。
         # 置顶只在未钉住时生效：钉住 ≠ 总在最前，见 _on_pin_toggled。
-        super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint)
+        super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         # 预览窗全是按钮（复制/另存/重试/取消），无输入法需求：禁关联避免任务栏
         # 语言栏闪现导致托盘图标位移（与遮罩同一处理，详见 overlay.py 同处注释）
         self.setAttribute(Qt.WA_InputMethodEnabled, False)
@@ -176,36 +176,59 @@ class PreviewDialog(QWidget):
         # 钉住：会话结束后窗口仍保留（2026-10-27 需求）。不钉住时随任务结束关闭。
         self.pinned = False
         self._session_ended = False  # 会话已结束（遮罩销毁）：重试不可用
+        self._drag_pos = None  # 标题栏拖动窗口的起点（全局坐标）
         self.setWindowTitle(tr("preview_title"))
         self.retheme(theme.current())
         theme.manager.changed.connect(self.retheme)
 
-        # 与 OCR 结果窗同构：根布局（#resultRoot）+ 标题行 + 内容 + 按钮行，
-        # 直接复用 theme.qss_result 的颜色/边框规则，明暗主题自动跟随。
+        # 根布局（#resultRoot）承载内容；标题栏单独一个 widget 贴在顶部，
+        # 便于整条做拖动/双击最大化，且按钮位置与系统标题栏一致。
         root = QVBoxLayout(self)
         root.setObjectName("resultRoot")
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        head = QHBoxLayout()
-        self.title = QLabel(tr("preview_title"), objectName="resultTitle")
-        self.meta = QLabel("", objectName="resultMeta")
-        head.addWidget(self.title)
-        head.addStretch(1)
-        head.addWidget(self.meta)
-        # 图钉：钉住 = 不随截图任务关闭；与"总在最前"无关（用户澄清）
-        self.btn_pin = QPushButton(objectName="pinBtn")
+        bar_widget = QWidget(objectName="previewTitleBar")
+        bar_widget.setFixedHeight(34)
+        bar = QHBoxLayout(bar_widget)
+        bar.setContentsMargins(12, 0, 0, 0)
+        bar.setSpacing(0)
+        self.title = QLabel(tr("preview_title"), objectName="previewTitle")
+        self.title.setAttribute(Qt.WA_TransparentForMouseEvents)  # 拖动窗口用
+        bar.addWidget(self.title)
+        bar.addStretch(1)
+        self.meta = QLabel("", objectName="previewMeta")
+        self.meta.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.meta.setStyleSheet("margin-right: 8px;")
+        bar.addWidget(self.meta)
+        # 顺序：图钉 → 最小化 → 最大化 → 关闭（图钉在最小化左边，用户指定）
+        self.btn_pin = QPushButton(objectName="titleBtn")
         self.btn_pin.setCheckable(True)
         self.btn_pin.setToolTip(tr("pin_tip"))
         self.btn_pin.toggled.connect(self._on_pin_toggled)
-        head.addWidget(self.btn_pin)
-        root.addLayout(head)
+        bar.addWidget(self.btn_pin)
+        self.btn_min = QPushButton(objectName="titleBtn")
+        self.btn_min.setToolTip(tr("minimize"))
+        self.btn_min.clicked.connect(self.showMinimized)
+        bar.addWidget(self.btn_min)
+        self.btn_max = QPushButton(objectName="titleBtn")
+        self.btn_max.clicked.connect(self._toggle_max)
+        bar.addWidget(self.btn_max)
+        self.btn_close = QPushButton(objectName="titleBtn")
+        self.btn_close.setToolTip(tr("close"))
+        self.btn_close.clicked.connect(self.close)
+        bar.addWidget(self.btn_close)
+        root.addWidget(bar_widget)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(14, 12, 14, 12)
+        body.setSpacing(8)
 
         # 画布自适应窗口（Expanding），最小尺寸沿用旧行为的初始大小；
         # 图片由 PreviewCanvas 按"保持纵横比 + 左上锚点"绘制，支持滚轮缩放与拖动。
         self.view = PreviewCanvas(self.image)
         self.view.setMinimumSize(*self._initial_view_size())
-        root.addWidget(self.view, 1)
+        body.addWidget(self.view, 1)
 
         btns = QHBoxLayout()
         # 与 OCR 结果窗的「复制文本」同款普通按钮：不加 primary 强调色，
@@ -217,13 +240,17 @@ class PreviewDialog(QWidget):
         self.btn_cancel = QPushButton(tr("preview_cancel"))
         for b in (self.btn_copy, self.btn_file, self.btn_save, self.btn_retry, self.btn_cancel):
             btns.addWidget(b)
-        root.addLayout(btns)
+        body.addLayout(btns)
+        root.addLayout(body)
 
         self.btn_copy.clicked.connect(self._copy)
         self.btn_file.clicked.connect(self._copy_as_file)
         self.btn_save.clicked.connect(self._save)
         self.btn_retry.clicked.connect(self._retry)
         self.btn_cancel.clicked.connect(self._cancel)
+        # 标题栏图标必须在按钮创建之后再刷一次：retheme 在 __init__ 早期就被调用，
+        # 那时 btn_pin 等还不存在，`hasattr` 守卫直接跳过了。
+        self._update_title_icons()
 
     def retheme(self, t):
         """照搬 OCR 结果窗的配色与边框（`theme.qss_result`）并同步窗口调色板。
@@ -235,15 +262,26 @@ class PreviewDialog(QWidget):
         from PyQt5.QtGui import QColor, QPalette
 
         extra = """
-#pinBtn { padding: 4px 12px; font-size: 12px; }
-#pinBtn:checked { background: %(accent)s; border: 1px solid transparent;
-                  color: %(on_acc)s; font-weight: 600; }
+/* 自绘标题栏：与内容同色系（结果窗 token），按钮无边框、悬停变色，
+   尺寸对齐系统标题栏（46x34） */
+#previewTitleBar { background: %(bg)s; }
+#previewTitle { font-size: 14px; font-weight: 600; color: %(text)s; }
+#previewMeta { font-size: 12px; color: %(sub)s; }
+QPushButton#titleBtn { background: transparent; border: none; border-radius: 0;
+                       padding: 0; min-width: 46px; max-width: 46px;
+                       min-height: 34px; max-height: 34px; }
+QPushButton#titleBtn:hover { background: %(hover)s; }
+QPushButton#titleBtn:pressed { background: %(border)s; }
+QPushButton#titleBtn:checked { background: %(accent)s; }
 #previewView { background: %(card)s; border: 1px solid %(border)s; border-radius: 8px; }
 """ % {
-            "accent": t.accent_css,
-            "on_acc": t.on_accent,
-            "card": t.card,
+            "bg": t.bg,
+            "text": t.text,
+            "sub": t.subtext,
+            "hover": t.hover,
             "border": t.border,
+            "accent": t.accent_css,
+            "card": t.card,
         }
         self.setStyleSheet(theme.qss_result(t) + extra)
         pal = self.palette()
@@ -287,7 +325,7 @@ class PreviewDialog(QWidget):
         self._update_title_icons()
 
     def _update_title_icons(self):
-        """重画图钉图标：钉住态用强调色上的可读色（否则同色图标在蓝底上不可见）。"""
+        """重画标题栏四个图标：图钉（钉住态用强调色上的可读色）+ 最小化/最大化/关闭。"""
         if not hasattr(self, "btn_pin"):
             return
         from PyQt5.QtGui import QIcon
@@ -296,6 +334,52 @@ class PreviewDialog(QWidget):
 
         t = theme.current()
         self.btn_pin.setIcon(QIcon(_icon_pm("pin", t.on_accent if self.pinned else t.icon)))
+        self.btn_min.setIcon(QIcon(_icon_pm("minimize", t.icon)))
+        _maxed = self.isMaximized()
+        self.btn_max.setIcon(QIcon(_icon_pm("restore" if _maxed else "maximize", t.icon)))
+        self.btn_max.setToolTip(tr("restore") if _maxed else tr("maximize"))
+        self.btn_close.setIcon(QIcon(_icon_pm("close_line", t.icon)))
+
+    def _toggle_max(self):
+        """最大化/还原切换（自绘标题栏自带，原生标题栏才由系统处理）。"""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+        self._update_title_icons()
+
+    def changeEvent(self, ev):
+        """窗口状态变化（最大化/还原）后刷新按钮图标。"""
+        super().changeEvent(ev)
+        if ev.type() == QEvent.WindowStateChange:
+            self._update_title_icons()
+
+    # ---------- 自绘标题栏：拖动与双击最大化 ----------
+    def mousePressEvent(self, ev):
+        if (
+            ev.button() == Qt.LeftButton
+            and ev.pos().y() <= 34
+            and not isinstance(self.childAt(ev.pos()), QPushButton)
+        ):
+            self._drag_pos = ev.globalPos() - self.frameGeometry().topLeft()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._drag_pos is not None and ev.buttons() & Qt.LeftButton:
+            self.move(ev.globalPos() - self._drag_pos)
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        self._drag_pos = None
+        super().mouseReleaseEvent(ev)
+
+    def mouseDoubleClickEvent(self, ev):
+        if ev.pos().y() <= 34 and not isinstance(self.childAt(ev.pos()), QPushButton):
+            self._toggle_max()
+            return
+        super().mouseDoubleClickEvent(ev)
 
     def closeEvent(self, ev):
         """关闭时通知宿主：钉住态下窗口关闭后，once 模式需要重新判定是否退出进程。

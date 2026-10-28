@@ -268,6 +268,15 @@ def _draw(name, color, size):
         p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.FlatCap))
         p.setBrush(Qt.NoBrush)
         p.drawLine(QPointF(20 * s, 36 * s), QPointF(44 * s, 36 * s))
+    elif name == "maximize":  # 最大化：单方框（与系统标题栏按钮同款细线）
+        p.setPen(QPen(QColor(color), 2.2 * s, Qt.SolidLine, Qt.SquareCap, Qt.MiterJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(22 * s, 22 * s, 20 * s, 20 * s))
+    elif name == "restore":  # 还原：两个重叠方框（最大化态的按钮图标）
+        p.setPen(QPen(QColor(color), 2.2 * s, Qt.SolidLine, Qt.SquareCap, Qt.MiterJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(21 * s, 26 * s, 16 * s, 16 * s))  # 后方框
+        p.drawRect(QRectF(26 * s, 21 * s, 16 * s, 16 * s))  # 前方框
     elif name == "close_line":  # 关闭：×（细线，与标题栏按钮一致；区别于 cancel 的粗叉）
         p.setPen(QPen(QColor(color), 3.0 * s, Qt.SolidLine, Qt.RoundCap))
         p.setBrush(Qt.NoBrush)
