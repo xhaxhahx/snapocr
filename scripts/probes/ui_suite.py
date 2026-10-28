@@ -696,9 +696,14 @@ def run(ctx):
     _pv16.btn_pin.setChecked(True)
     _QT14.qWait(30)
     check("Z16e 钉住按钮切换 pinned", _pv16.pinned is True)
-    _pv16._minimize_or_finish()
-    _QT14.qWait(30)
-    check("Z16e2 最小化发 finished 且窗口保留", bool(_got16) and _pv16.isVisible())
+    # 改用原生标题栏后不再有自绘"最小化=结束会话"按钮：验证系统最大化可用、
+    # 且钉住态窗口保持可见（2026-10-28 照搬结果窗样式）
+    _pv16.showMaximized()
+    _QT14.qWait(60)
+    _max16 = _pv16.isMaximized()
+    _pv16.showNormal()
+    _QT14.qWait(40)
+    check("Z16e2 原生最大化可用且钉住窗口保留", _max16 and _pv16.isVisible())
 
     # f) 钉住态 Esc 不关窗（docs/03 §4）；未钉住时 Esc 关闭
     _pv16.keyPressEvent(_QK16(_QE16.KeyPress, Qt.Key_Escape, Qt.NoModifier))
@@ -761,11 +766,11 @@ def run(ctx):
 
     _ok17b = True
     try:
-        _pv17._minimize_or_finish()
+        _pv17._retry()  # 会话后重试按钮已禁用，即便被程序调用也只能关窗，不得崩
         _QT14.qWait(150)
     except Exception:
         _ok17b = False
-    check("Z17b 会话结束后点最小化不崩且窗口保留", _ok17b and _pv17.isVisible())
+    check("Z17b 会话结束后调用重试不崩", _ok17b)
     check("Z17c 会话结束后重试按钮被禁用", not _pv17.btn_retry.isEnabled())
     check("Z17d 会话结束后复制按钮仍可用", _pv17.btn_copy.isEnabled())
 
@@ -779,4 +784,48 @@ def run(ctx):
     else:
         with contextlib.suppress(AttributeError):
             del app.on_preview_closed
+    app.processEvents()
+
+    # ---- Z18 预览窗外观与钉住语义（2026-10-28 用户要求）----
+    # a) 照搬结果窗样式：同一套 qss_result + QPalette + 自动填充背景，明暗都跟
+    from snapocr.ui.theme import Theme as _Theme18
+
+    _pv18 = _PD16(_img16, cfg)
+    _pv18.show()
+    _QT14.qWait(100)
+    _ok18 = True
+    for _dark in (False, True):
+        _t18 = _Theme18(dark=_dark)
+        _pv18.retheme(_t18)
+        _QT14.qWait(40)
+        _pal = _pv18.palette()
+        if not (
+            _pal.color(_pal.Window).name() == _t18.bg
+            and _pal.color(_pal.Base).name() == _t18.card
+            and "#resultRoot" in _pv18.styleSheet()
+            and _t18.bg in _pv18.styleSheet()
+        ):
+            _ok18 = False
+    check("Z18a 样式/调色板照搬结果窗且明暗同步", _ok18)
+    check("Z18a2 自动填充背景（原生绘制部分也跟主题）", _pv18.autoFillBackground())
+
+    # b) 钉住 ≠ 总在最前：钉住取消置顶，取消钉住恢复置顶
+    _pv18.btn_pin.setChecked(True)
+    _QT14.qWait(60)
+    _top_pinned = bool(_pv18.windowFlags() & Qt.WindowStaysOnTopHint)
+    _pv18.btn_pin.setChecked(False)
+    _QT14.qWait(60)
+    _top_normal = bool(_pv18.windowFlags() & Qt.WindowStaysOnTopHint)
+    check("Z18b 钉住后取消置顶（钉住≠最前）", not _top_pinned)
+    check("Z18b2 取消钉住后恢复置顶", _top_normal)
+
+    # c) 钉住时再次截图不隐藏：验证 start_capture 的排除条件成立
+    _pv18.btn_pin.setChecked(True)
+    _QT14.qWait(40)
+    check(
+        "Z18c 钉住预览窗满足不隐藏条件",
+        isinstance(_pv18, _PD16) and getattr(_pv18, "pinned", False) and _pv18.isVisible(),
+    )
+    _pv18.close()
+    _pv18.deleteLater()
     app.processEvents()

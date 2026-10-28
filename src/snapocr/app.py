@@ -87,9 +87,14 @@ class CaptureController(QObject):
             return  # 已在进行
         # 隐藏自家窗口，避免被截进去
         for w in QApplication.topLevelWidgets():
-            if w.isVisible() and w is not self.app.toast:
-                w.hide()
-                self._hiding.append(w)
+            if not w.isVisible() or w is self.app.toast:
+                continue
+            # 钉住的预览窗不隐藏：钉住只表示"不随截图任务关闭"，用户希望它一直
+            # 留在屏上（2026-10-28 用户澄清），再次截图时也不该消失。
+            if isinstance(w, PreviewDialog) and getattr(w, "pinned", False):
+                continue
+            w.hide()
+            self._hiding.append(w)
         QApplication.processEvents()
         overlays = []
         first_pm = None
