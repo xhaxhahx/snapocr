@@ -8,6 +8,7 @@ import time
 from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QPainter
 from PyQt5.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -173,6 +174,7 @@ class PreviewDialog(QWidget):
         self._busy = False
         # 钉住：会话结束后窗口仍保留（2026-10-27 需求）。不钉住时随任务结束关闭。
         self.pinned = False
+        self._session_ended = False  # 会话已结束（遮罩销毁）：重试不可用
         self._drag_pos = None  # 标题栏拖动窗口的起点（全局坐标）
         self.setWindowTitle(tr("preview_title"))
         self.retheme(theme.current())
@@ -301,6 +303,16 @@ class PreviewDialog(QWidget):
         return max(120, int(iw * scale)), max(80, int(ih * scale))
 
     # ---------- 钉住 ----------
+    def set_session_ended(self):
+        """会话已结束（遮罩已销毁）：禁用「重试」——它无法回到编辑器，点了只会关窗。
+
+        钉住窗的寿命长于遮罩，用户可能在会话结束后才去点按钮；不禁用会让
+        "重试"看起来可用却只是把窗口关掉（2026-10-28 行为测试发现）。
+        """
+        self._session_ended = True
+        self.btn_retry.setEnabled(False)
+        self.btn_retry.setToolTip(tr("retry_unavailable"))
+
     def _on_pin_toggled(self, pinned):
         self.pinned = bool(pinned)
         self.btn_pin.setToolTip(tr("unpin_tip") if self.pinned else tr("pin_tip"))
@@ -358,8 +370,16 @@ class PreviewDialog(QWidget):
         super().mouseDoubleClickEvent(ev)
 
     def closeEvent(self, ev):
-        """关闭时通知宿主：钉住态下窗口关闭后，once 模式需要重新判定是否退出进程。"""
+        """关闭时通知宿主：钉住态下窗口关闭后，once 模式需要重新判定是否退出进程。
+
+        直接调 app 上的钩子而不是只发信号——钉住窗的寿命长于 OverlayWindow，
+        会话结束后遮罩已销毁、其信号连接随之失效，只靠 `closed` 信号会让
+        "关掉钉住窗后进程不退出"（2026-10-28 实测）。
+        """
         self.closed.emit()
+        hook = getattr(QApplication.instance(), "on_preview_closed", None)
+        if callable(hook):
+            hook()
         super().closeEvent(ev)
 
     # ---------- 展示 ----------
@@ -381,6 +401,10 @@ class PreviewDialog(QWidget):
         self._busy = busy
         for b in (self.btn_copy, self.btn_file, self.btn_save, self.btn_retry, self.btn_cancel):
             b.setEnabled(not busy)
+        # 会话结束后重试始终不可用：否则任何一次动作（复制/另存）结束时的
+        # 解除忙碌都会把它重新启用，用户点了只会关窗（2026-10-28 行为测试发现）
+        if self._session_ended:
+            self.btn_retry.setEnabled(False)
 
     def keyPressEvent(self, ev):
         k, m = ev.key(), ev.modifiers()

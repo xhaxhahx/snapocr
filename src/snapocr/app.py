@@ -152,7 +152,10 @@ class CaptureController(QObject):
 
     def _close_overlays(self):
         for ov in self.overlays:
-            ov.hide()
+            # 用 close() 而不是 hide()：遮罩的 closeEvent 负责断开与钉住预览窗的
+            # 信号连接、并告知"会话已结束"（禁用重试）。hide() 不触发 closeEvent，
+            # 会导致钉住窗后续点击回调到已销毁的遮罩（2026-10-28 客户机崩溃）。
+            ov.close()
             ov.release_buffers()  # 立即释放抓屏缓冲（4K 双屏可达数百 MB）
             ov.deleteLater()
         self.overlays = []

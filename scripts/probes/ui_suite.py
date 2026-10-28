@@ -9,6 +9,7 @@
 依赖通过 `ctx` 注入（app/scr/check/skip/cfg），与 ux_suite 同款约定。
 """
 
+import contextlib
 import os
 
 from PyQt5.QtCore import QPointF, Qt
@@ -713,4 +714,69 @@ def run(ctx):
     _pv16.deleteLater()
     _cv16.close()
     _cvb16.close()
+    app.processEvents()
+
+    # ---- Z17 钉住预览窗 × 会话结束后的生命周期（2026-10-28 客户机崩溃）----
+    # 钉住窗寿命长于遮罩：会话结束后遮罩被销毁，若信号仍连着它，点复制/最小化会
+    # 回调到已删除的 OverlayWindow（RuntimeError 甚至直接崩溃）。
+    # 修复：遮罩 closeEvent 断开连接并通知"会话已结束"；_close_overlays 改用 close()
+    # 触发 closeEvent（原先 hide() 不触发，导致清理逻辑形同虚设）。
+    from PyQt5.QtCore import QRectF as _QR17
+    from PyQt5.QtGui import QPixmap as _QP17
+
+    _hook17 = []
+    _prev_hook = getattr(app, "on_preview_closed", None)
+    app.on_preview_closed = lambda: _hook17.append(1)
+
+    def _session17(_pinned):
+        _ov = OverlayWindow(scr, _QP17.fromImage(_sample_image(800, 600)), cfg)
+        _ov.show()
+        app.processEvents()
+        _ov.start()
+        app.processEvents()
+        _ov.sel = _QR17(100, 100, 400, 300)
+        _ov._finalize()
+        _QT14.qWait(100)
+        _ov._done()
+        _QT14.qWait(150)
+        _pv = _ov._preview
+        if _pinned:
+            _pv.btn_pin.setChecked(True)
+            _QT14.qWait(40)
+        # 模拟真实退出路径：close() + deleteLater()（与 app._close_overlays 一致）
+        _ov.close()
+        _ov.deleteLater()
+        app.processEvents()
+        _QT14.qWait(180)
+        return _pv
+
+    _pv17 = _session17(True)
+    _ok17 = True
+    try:
+        _pv17._copy()
+        _QT14.qWait(150)
+    except Exception:
+        _ok17 = False
+    check("Z17a 会话结束后点复制不崩且窗口保留", _ok17 and _pv17.isVisible())
+
+    _ok17b = True
+    try:
+        _pv17._minimize_or_finish()
+        _QT14.qWait(150)
+    except Exception:
+        _ok17b = False
+    check("Z17b 会话结束后点最小化不崩且窗口保留", _ok17b and _pv17.isVisible())
+    check("Z17c 会话结束后重试按钮被禁用", not _pv17.btn_retry.isEnabled())
+    check("Z17d 会话结束后复制按钮仍可用", _pv17.btn_copy.isEnabled())
+
+    _pv17.btn_cancel.click()
+    _QT14.qWait(150)
+    check("Z17e 会话结束后点取消可关闭窗口", not _pv17.isVisible())
+    check("Z17f 关闭预览窗触发 on_preview_closed 钩子", len(_hook17) >= 1)
+
+    if _prev_hook is not None:
+        app.on_preview_closed = _prev_hook
+    else:
+        with contextlib.suppress(AttributeError):
+            del app.on_preview_closed
     app.processEvents()

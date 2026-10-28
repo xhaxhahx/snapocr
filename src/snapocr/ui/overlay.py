@@ -9,6 +9,7 @@
 历史注记：必须用 Qt.Window 而非 Qt.Tool——部分环境(如 RDP/虚拟机 DWM)不合成
 全屏 Tool 窗口，导致遮罩不可见（详见 docs/05-测试报告.md）。"""
 
+import contextlib
 import os
 import time
 
@@ -515,6 +516,26 @@ class OverlayWindow(QWidget):
         p.drawLine(QPointF(cx - 8, cy), QPointF(cx + 8, cy))
         p.drawLine(QPointF(cx, cy - 8), QPointF(cx, cy + 8))
 
+    def closeEvent(self, ev):
+        """遮罩关闭（会话结束）：断开与预览窗的信号连接。
+
+        钉住的预览窗寿命**长于**本遮罩——会话结束后它仍在屏上，用户还会点
+        复制/最小化/关闭。若不在此断开，这些信号会回调到已销毁的 OverlayWindow，
+        表现为 `RuntimeError: wrapped C/C++ object ... has been deleted`
+        甚至直接崩溃（2026-10-28 客户机实测）。
+        进程去留改由 `PreviewDialog.closeEvent → app.on_preview_closed` 判定，
+        不依赖本对象存活。
+        """
+        pv = self._preview
+        if pv is not None:
+            for sig in ("copyDone", "saveDone", "finished", "closed"):
+                with contextlib.suppress(TypeError, RuntimeError):
+                    getattr(pv, sig).disconnect()
+            # 会话已结束：钉住窗保留，但"重试"已无法回到编辑，禁用免得误导
+            with contextlib.suppress(RuntimeError, AttributeError):
+                pv.set_session_ended()
+        super().closeEvent(ev)
+
     def _teardown_canvas(self):
         """退出编辑态：移除画布与工具条（重新框选/取消时复用）。
 
@@ -999,10 +1020,15 @@ class OverlayWindow(QWidget):
         self.ocrRequested.emit(self.composite(), self.global_rect(), self.screen)
 
     def _on_preview_finished(self, pv):
-        """预览窗完成一次动作（复制/另存）：未钉住则关闭窗口，钉住则保留。"""
+        """预览窗完成一次动作（复制/另存/最小化）：未钉住则关闭窗口，钉住则保留。
+
+        防御：若本遮罩已销毁（钉住窗在会话结束后才操作），`finished.emit()` 会抛
+        RuntimeError —— 此时会话早已结束，无需再发信号，直接忽略即可。
+        """
         if not getattr(pv, "pinned", False):
             pv.close()
-        self.finished.emit()
+        with contextlib.suppress(RuntimeError):
+            self.finished.emit()
 
     def _done(self):
         """完成 → 预览确认窗（复制/另存/重试），借鉴 Firefox 预览流。"""
