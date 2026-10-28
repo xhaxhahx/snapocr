@@ -195,8 +195,16 @@ class SettingsDialog(QWidget):
             self.dir_edit.setText(d)
 
     def _restore_defaults(self):
-        """恢复默认值：写盘并回填控件（控件即时回默认即是最好的反馈，不弹模态框）。"""
+        """恢复默认值：写盘并回填控件（控件即时回默认即是最好的反馈，不弹模态框）。
+
+        开机自启**不参与**恢复默认：它由安装页选择/系统状态决定（sync_autostart_cfg
+        对齐），属于装机选择而非应用偏好——用户点"恢复默认"+确定不应被悄悄关掉
+        开机自启（2026-10-29 体验轮实测陷阱）。
+        """
+        keep_autostart = self.cfg.get("autostart")
         self.cfg.reset()
+        if keep_autostart:
+            self.cfg.set("autostart", True)
         self._reload_widgets()
 
     def _apply(self):

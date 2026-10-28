@@ -6,7 +6,14 @@ import os
 
 from PyQt5.QtCore import QEvent, QObject, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QGuiApplication, QIcon
-from PyQt5.QtWidgets import QApplication, QLabel, QMenu, QMessageBox, QSystemTrayIcon
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QSystemTrayIcon,
+)
 
 from . import APP_DISPLAY
 from .config import Config
@@ -95,6 +102,15 @@ class CaptureController(QObject):
             if isinstance(w, PreviewDialog) and getattr(w, "pinned", False):
                 continue
             w.hide()
+            # 用户在会话期间关闭的对话框（如设置窗 Esc/reject）不得在会话结束时
+            # 被 _restore_windows 复活：hide 时清标记、closed 后打标记（只对
+            # QDialog 有可靠的 closed 语义；其余窗口极少在会话期间被关）。
+            if isinstance(w, QDialog):
+                w._snap_user_closed = False
+                if not getattr(w, "_snap_close_hooked", False):
+                    # self._settings 等对话框跨会话存活，只挂一次
+                    w._snap_close_hooked = True
+                    w.finished.connect(lambda _r, _w=w: setattr(_w, "_snap_user_closed", True))
             self._hiding.append(w)
         QApplication.processEvents()
         overlays = []
@@ -189,7 +205,7 @@ class CaptureController(QObject):
 
     def _restore_windows(self):
         for w in self._hiding:
-            if w is self.result:
+            if w is self.result or getattr(w, "_snap_user_closed", False):
                 continue
             # 会话期间被用户关掉的窗口，其 C++ 对象可能已销毁：PyQt 对已删除对象
             # 调 show() 会抛 RuntimeError（概率低但路径真实），守卫后跳过即可。

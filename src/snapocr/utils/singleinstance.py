@@ -35,7 +35,22 @@ class SingleInstance(QObject):
 
         「已连接但 ack 超时」不能当作没有实例：此时若本进程再 listen()，
         会 removeServer 掉对方正在用的管道并抢同一名字，表现为偶发双开、热键互抢。
+
+        ack 超时多半是常驻实例事件循环被占住（OCR/UIA/大对话框）而非命令丢失：
+        2026-10-29 实测一次 UNCERTAIN——命令实际延迟送达。因此等待放宽到 3s，
+        并整体重试一次；三条命令均幂等（settings=show、capture=overlays 守卫、
+        exit 幂等），重发不会产生副作用。
         """
+        for attempt in (1, 2):
+            result = self._try_forward_once(args)
+            if result == self.FORWARDED:
+                return self.FORWARDED
+            if attempt == 1 and result == self.UNCERTAIN:
+                continue  # 重试一次
+            return result
+        return self.UNCERTAIN
+
+    def _try_forward_once(self, args) -> str:
         sock = QLocalSocket()
         sock.connectToServer(KEY)
         if not sock.waitForConnected(600):
@@ -46,7 +61,7 @@ class SingleInstance(QObject):
             if not sock.waitForBytesWritten(600):
                 return self.UNCERTAIN
             # 等服务端 ack，确保其已完整读到命令再断开
-            ok = sock.waitForReadyRead(1500)
+            ok = sock.waitForReadyRead(3000)
             resp = bytes(sock.readAll()) if ok else b""
             if resp.strip() == b"ok":
                 return self.FORWARDED
