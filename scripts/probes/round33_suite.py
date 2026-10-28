@@ -181,6 +181,10 @@ def run(ctx):
     ov9._last_move_t = 0.0  # 清掉上一次拖动的时间戳，确保首次 move 不被节流
     ov9.mouseMoveEvent(_move(QPointF(260, 210)))
     c3_immediate = ov9.sel.left() != left_before  # 新行为：立即生效
+    # 首次执行可能 >8ms（img.copy + 重绘）：显式重置时间戳，确保第二次判为 <8ms
+    import time as _t_c3
+
+    ov9._last_move_t = _t_c3.monotonic()
     ov9.mouseMoveEvent(_move(QPointF(270, 220)))  # 紧接着（<8ms）→ 应被挂起
     c3_coalesced = ov9._pending_move_pos is not None
     ov9.mouseReleaseEvent(_release(QPointF(270, 220)))
@@ -239,7 +243,10 @@ def run(ctx):
 
     # ---- C1 写盘去抖：窗口期内不落盘、到期合并一次；save/reset 立即 ----
     if os.path.isfile(cfg_path):
-        os.remove(cfg_path)
+        # 删除可能被环境拦截（沙箱 safe-delete 把 .tmp 下的文件当用户文件）：
+        # 删除失败不影响后续断言——C1 关心的是"窗口期内不落盘"，基线可由 _flush_now 重建。
+        with contextlib.suppress(OSError):
+            os.remove(cfg_path)
     cfgc = Config()
     cfgc._flush_now()  # 先建立基线文件（构造本身不写盘）
 

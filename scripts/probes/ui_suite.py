@@ -451,6 +451,9 @@ def run(ctx):
     _x0 = _ov3.sel.left()
     _ov3._request_move(QPointF(_x0 + 40, _ov3.sel.top()))
     _immediate = _ov3.sel.left() != _x0
+    # 首次执行本身可能耗时 >8ms（含 img.copy 与重绘），若不重置时间戳，
+    # 第二次调用会被判为"已过间隔"而立即执行，导致偶发误报。
+    _ov3._last_move_t = _time.monotonic()
     _ov3._request_move(QPointF(_x0 + 80, _ov3.sel.top()))
     _parked = _ov3._pending_move_pos is not None
     check("Z13a 节流：≥8ms 立即执行（跟手）", _immediate)
