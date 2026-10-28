@@ -141,6 +141,21 @@ def main():
     if "--exit" in args:
         log.info("无运行实例，--exit 直接退出")
         return 0
+    # 自愈重启（docs/06 L2）：新进程等旧进程管道消失后再 listen——旧进程 quit 与
+    # 管道释放有几秒级窗口（OCR 线程收尾），直接 listen 会 removeServer 抢名冲突。
+    if "--recycle" in args:
+        import time as _time
+
+        deadline = _time.monotonic() + 15
+        while _time.monotonic() < deadline:
+            if si.try_connect(["--noop"]) == SingleInstance.NO_INSTANCE:
+                break
+            _time.sleep(0.2)
+        else:
+            log.warning("自愈重启：旧实例 15s 未退出，放弃接管（保持单实例）")
+            return 0
+        # 轮询里转发的 --noop 全部被旧实例忽略，安全
+        args = [a for a in args if a != "--recycle"]
 
     si.listen()
     # "复制为文件"的上次落盘残留清理（本会话刚写入的文件不受影响）

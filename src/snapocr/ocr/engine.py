@@ -103,6 +103,12 @@ def release_engine():
     with _lock:
         _engine = None
         _engine_key = None
+    # 置空引用≠内存归还：onnxruntime 会话对象要等 Python GC 析构才真正释放。
+    # 不主动 collect 时旧会话可延迟数轮不回收，表现为"每轮 OCR +13MB 常驻堆积"
+    # （docs/06 实测根因①）。释放路径低频，collect 的几十毫秒可接受。
+    import gc
+
+    gc.collect()
 
 
 def qimage_to_bgr(img) -> np.ndarray:

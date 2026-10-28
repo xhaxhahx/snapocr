@@ -2,10 +2,13 @@
 """应用装配：托盘、热键、截屏控制器、OCR 调度、设置窗口。"""
 
 import contextlib
+import gc
 import os
+import subprocess
+import sys
 
 from PyQt5.QtCore import QEvent, QObject, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QGuiApplication, QIcon
+from PyQt5.QtGui import QGuiApplication, QIcon, QPixmapCache
 from PyQt5.QtWidgets import (
     QApplication,
     QDialog,
@@ -33,6 +36,7 @@ from .ui.preview_dialog import PreviewDialog
 from .ui.result_window import ResultWindow
 from .ui.settings_dialog import SettingsDialog
 from .utils.logger import get_logger
+from .utils.memory_watchdog import MemoryWatchdog
 
 log = get_logger()
 
@@ -202,6 +206,10 @@ class CaptureController(QObject):
             ov.deleteLater()
         self.overlays = []
         self._restore_windows()
+        # 会话末顺手软释放（docs/06 L1-b）：OCR/抓屏路径的临时对象多为跨代引用，
+        # 不主动 collect 会滞留数轮；QPixmapCache 可能缓存标注/托盘位图。
+        gc.collect()
+        QPixmapCache.clear()
 
     def _restore_windows(self):
         for w in self._hiding:
@@ -222,7 +230,42 @@ class CaptureController(QObject):
 
     def _preview_closed(self):
         """PreviewDialog.closeEvent 宿主钩子（挂在 QApplication 实例，见 SnapApp）。"""
+        # 已关闭的预览窗立即摘出强引用表：其合成 QImage 可达全屏大小（~8MB），
+        # 留到下一轮会话结束才清会造成可观的滞留（docs/06 L1-c）。
+        self._previews = [w for w in self._previews if w.isVisible()]
         self._maybe_quit_once()
+
+    def busy(self) -> bool:
+        """内存看门狗的"忙碌"判定：任一为真则本轮跳过，绝不清理/重启。
+
+        覆盖：截屏会话（遮罩/结果窗/预览窗/设置窗任一可见）+ OCR 线程在跑。
+        """
+        if self.overlays or self._hiding:
+            return True
+        if self.worker is not None and self.worker.isRunning():
+            return True
+        if self.result is not None and self.result.isVisible():
+            return True
+        if getattr(self, "_settings", None) is not None and self._settings.isVisible():
+            return True
+        if any(
+            isinstance(w, PreviewDialog) and w.isVisible()
+            for w in QApplication.topLevelWidgets()
+        ):
+            return True
+        return False
+
+    def _soft_release(self):
+        """看门狗 L1 软释放：空闲时回收可回收缓存（docs/06 §3）。
+
+        释放引擎是其中最重的一步——空闲态用户无感（下次识别自动重载 ~1.2s）；
+        会话中绝不调用（见 busy()）。
+        """
+        self._previews = [w for w in self._previews if w.isVisible()]
+        gc.collect()
+        QPixmapCache.clear()
+        if ocr_engine.engine_loaded():
+            ocr_engine.release_engine()  # 内部自带 gc.collect()
 
     # ---------- 用完即走（--once / 单文件版默认） ----------
     def _maybe_quit_once(self):
@@ -405,6 +448,17 @@ class SnapApp(QObject):
         # 用户此后关闭钉住窗只能经由本钩子触发 once 模式退出重判
         # （此前钩子从未实现——once 模式"关掉钉住窗后进程不退出"，2026-10-29 补齐）。
         QApplication.instance().on_preview_closed = self.controller._preview_closed
+
+        # 内存看门狗（docs/06）：once 模式进程短命，无意义；托盘常驻才需要。
+        if not self.once:
+            self._watchdog = MemoryWatchdog(
+                self,
+                is_busy=self.controller.busy,
+                soft_release=self.controller._soft_release,
+                do_recycle=self._recycle_self,
+            )
+            self._watchdog.recycled.connect(self._notify_recycled)
+            self._watchdog.start()
 
         # 托盘（线稿相机按物理像素渲染，随主题反色，贴近系统托盘图标风格）
         self.tray = QSystemTrayIcon(self._tray_icon())
@@ -611,6 +665,48 @@ class SnapApp(QObject):
             self.open_settings()
         elif "--exit" in a:
             self.quit()
+        elif "--recycle" in a:  # 自愈通道：手动/看门狗触发的内存整理重启
+            self._recycle_self()
+
+    # ---------- 自愈重启（docs/06 L2）----------
+    def _recycle_self(self):
+        """派生新进程接管后本进程退出：内存回到初始化基线的最终兜底。
+
+        安全性：剪贴板由 quit() 的 OleFlushClipboard 交接给系统；调用方（看门狗/
+        --recycle 命令）保证此时无会话、无可见窗口。新进程以 --recycle 等待本进程
+        管道消失后再 listen，避免抢名。
+        """
+        try:
+            if getattr(sys, "frozen", False):
+                argv = [sys.executable, "--hidden", "--resident", "--recycle"]
+            else:
+                # 源码运行：python src/run.py --hidden --resident --recycle
+                script = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "run.py")
+                )
+                argv = [sys.executable, script, "--hidden", "--resident", "--recycle"]
+            flags = 0
+            if os.name == "nt":
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(
+                argv,
+                creationflags=flags,
+                close_fds=True,
+                cwd=os.path.dirname(os.path.abspath(argv[1] if len(argv) > 2 else argv[0])),
+            )
+            log.info("自愈重启：新进程已派生 %r", argv)
+        except Exception:
+            log.exception("自愈重启派生失败——放弃本次回收，看门狗下轮再试")
+            return
+        self.quit()
+
+    def _notify_recycled(self):
+        with contextlib.suppress(Exception):
+            self.tray.showMessage(
+                APP_DISPLAY, tr("recycle_done"), QSystemTrayIcon.Information, 2000
+            )
 
     def quit(self):
         with contextlib.suppress(Exception):
