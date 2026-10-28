@@ -49,6 +49,11 @@ class PreviewCanvas(QWidget):
         self._zoom = self.MIN_ZOOM
         self._offset = QPoint(0, 0)
         self._drag_from = None  # 拖动起点（相对图片左上角的偏移）
+        # 缩放结果缓存：scaled() 实测 1080p 4.6ms、4K 22.5ms，每帧重算会让拖动
+        # 掉到 45fps 以下（4K 甚至 22ms/帧）。缓存键 = 绘制尺寸 + zoom，
+        # 拖动/重绘命中缓存，只有滚轮与窗口尺寸变化才重算一次。
+        self._cache_key = None
+        self._cache_img = None
         self.setObjectName("previewView")
         # QSS 的 background/border 只对"样式化背景"生效，自定义 QWidget 必须显式开启
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -87,13 +92,19 @@ class PreviewCanvas(QWidget):
             self.setCursor(Qt.OpenHandCursor if self._can_pan() else Qt.ArrowCursor)
 
     # ---------- 绘制 ----------
+    def _render_image(self) -> QImage:
+        """按当前绘制尺寸取（或重算）缩放后的图；拖动/重绘走缓存。"""
+        d = self.draw_size()
+        key = (d.width(), d.height(), self._zoom)
+        if key != self._cache_key:
+            self._cache_key = key
+            self._cache_img = self._img.scaled(d, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        return self._cache_img
+
     def paintEvent(self, ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, self._zoom < 4.0)
-        d = self.draw_size()
-        p.drawImage(
-            self._offset, self._img.scaled(d, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        )
+        p.drawImage(self._offset, self._render_image())
         p.end()
 
     # ---------- 交互 ----------
@@ -377,6 +388,12 @@ class PreviewDialog(QWidget):
             return
         ctrl = m & Qt.ControlModifier
         if k == Qt.Key_Escape:
+            # 钉住态：Esc **不关窗**（docs/03 §4：Esc / 右键取消 / 操作按钮都不会杀掉
+            # 钉住的窗口）。「取消」按钮仍会关闭——那是用户明确的关闭意图，
+            # 与 Esc 的"退出当前操作"语义不同，所以两者不能共用 _cancel。
+            if self.pinned:
+                self.btn_copy.setFocus()
+                return
             self._cancel()
         elif k == Qt.Key_C and ctrl:
             self._copy()
