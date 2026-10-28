@@ -162,6 +162,10 @@ class CaptureController(QObject):
             # 会导致钉住窗后续点击回调到已销毁的遮罩（2026-10-28 客户机崩溃）。
             ov.close()
             ov.release_buffers()  # 立即释放抓屏缓冲（4K 双屏可达数百 MB）
+            # destroy() 归还原生 Win32 窗口的 backing store：全屏 1920×1080 遮罩
+            # 每次 show/close 泄漏 ~8MB（Commit 内存实测 20 轮 +56MB），仅
+            # deleteLater 无法归还（2026-10-28 内存生命周期专项实测 F0/F2）。
+            ov.destroy()
             ov.deleteLater()
         self.overlays = []
         self._restore_windows()
