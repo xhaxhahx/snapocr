@@ -829,3 +829,27 @@ def run(ctx):
     _pv18.close()
     _pv18.deleteLater()
     app.processEvents()
+
+    # ---- Z19 预览窗复制按钮：普通样式、纯文字、无快捷键（2026-10-28 用户要求）----
+    # 此前是 primary（强调蓝）+ 文案带 "(Ctrl+C)" 后缀 + Ctrl+C/Enter 触发复制。
+    # 结果窗的「复制文本」是普通按钮，用户要求预览窗保持一致。
+    _pv19 = _PD16(_img16, cfg)
+    _pv19.show()
+    _QT14.qWait(100)
+    check("Z19a 复制按钮文字只有「复制图片」", _pv19.btn_copy.text() == "复制图片")
+    check("Z19b 复制按钮不用强调色（非 primary）", _pv19.btn_copy.objectName() != "primary")
+
+    _copied19 = []
+    _pv19.copyDone.connect(lambda: _copied19.append(1))
+
+    def _key19(_k, _m=Qt.NoModifier):
+        _pv19.keyPressEvent(_QK16(_QE16.KeyPress, _k, _m))
+        _QT14.qWait(60)
+
+    _key19(Qt.Key_C, Qt.ControlModifier)
+    _key19(Qt.Key_Return)
+    _key19(Qt.Key_Enter)
+    check("Z19c 复制快捷键已取消（Ctrl+C/Enter 不复制）", not _copied19)
+    _pv19.close()
+    _pv19.deleteLater()
+    app.processEvents()

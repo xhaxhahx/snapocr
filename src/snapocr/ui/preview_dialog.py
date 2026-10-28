@@ -208,7 +208,9 @@ class PreviewDialog(QWidget):
         root.addWidget(self.view, 1)
 
         btns = QHBoxLayout()
-        self.btn_copy = QPushButton(tr("preview_copy") + "  (Ctrl+C)", objectName="primary")
+        # 与 OCR 结果窗的「复制文本」同款普通按钮：不加 primary 强调色，
+        # 文字也不带快捷键后缀（2026-10-28 用户要求"只要复制图片这4个字"）
+        self.btn_copy = QPushButton(tr("preview_copy"))
         self.btn_file = QPushButton(tr("copy_as_jpg"))
         self.btn_save = QPushButton(tr("preview_save"))
         self.btn_retry = QPushButton(tr("preview_retry"))
@@ -345,12 +347,8 @@ class PreviewDialog(QWidget):
                 self.btn_copy.setFocus()
                 return
             self._cancel()
-        elif k == Qt.Key_C and ctrl:
-            self._copy()
         elif k == Qt.Key_S and ctrl:
             self._save()
-        elif k in (Qt.Key_Return, Qt.Key_Enter):
-            self._copy()
         else:
             super().keyPressEvent(ev)
 
