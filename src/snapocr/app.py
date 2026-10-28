@@ -78,6 +78,7 @@ class CaptureController(QObject):
         self.worker = None
         self._stale_ocr = False  # 选区已移动：在途识别结果作废（U3）
         self._hiding = []
+        self._previews = []  # 存活的预览窗强引用（见 _close_overlays）
 
     # ---------- 截屏 ----------
     def start_capture(self):
@@ -156,7 +157,23 @@ class CaptureController(QObject):
             target._toast(hint)
 
     def _close_overlays(self):
+        # 先清掉本类持有的**已关闭**预览窗强引用（上一轮钉住、此后被 × 的窗），
+        # 让 sip 正常回收；存活判定放回收之后做补挂，避免把本轮要保留的误清。
+        self._previews = [w for w in self._previews if w.isVisible()]
         for ov in self.overlays:
+            pv = getattr(ov, "_preview", None)
+            # 钉住的预览窗必须由本类**强引用**：PreviewDialog 无父级，PyQt 里归
+            # Python 所有——遮罩包装（唯一持引者 ov._preview）随 overlays 清空被
+            # 回收时，sip 会静默销毁 C++ 预览窗：无 closeEvent/hideEvent、无
+            # deleteLater 可查，表现为"钉住后点复制，预览窗凭空消失"
+            # （2026-10-29 插桩实证，复现 3/3）。
+            if (
+                pv is not None
+                and isinstance(pv, PreviewDialog)
+                and pv.isVisible()
+                and pv not in self._previews
+            ):
+                self._previews.append(pv)
             # 用 close() 而不是 hide()：遮罩的 closeEvent 负责断开与钉住预览窗的
             # 信号连接、并告知"会话已结束"（禁用重试）。hide() 不触发 closeEvent，
             # 会导致钉住窗后续点击回调到已销毁的遮罩（2026-10-28 客户机崩溃）。
@@ -185,6 +202,10 @@ class CaptureController(QObject):
         if self.result is not None:
             self.result.close()  # 会话结束不留孤儿结果窗
         self._close_overlays()
+        self._maybe_quit_once()
+
+    def _preview_closed(self):
+        """PreviewDialog.closeEvent 宿主钩子（挂在 QApplication 实例，见 SnapApp）。"""
         self._maybe_quit_once()
 
     # ---------- 用完即走（--once / 单文件版默认） ----------
@@ -363,6 +384,11 @@ class SnapApp(QObject):
         sync_autostart_cfg(self.cfg)
         self.toast = ToastLabel()
         self.controller = CaptureController(self)
+        # PreviewDialog.closeEvent 的宿主钩子挂在 plain QApplication 实例上：
+        # 钉住窗寿命长于遮罩，遮罩销毁时其 closeEvent 已断开 closed→previewClosed，
+        # 用户此后关闭钉住窗只能经由本钩子触发 once 模式退出重判
+        # （此前钩子从未实现——once 模式"关掉钉住窗后进程不退出"，2026-10-29 补齐）。
+        QApplication.instance().on_preview_closed = self.controller._preview_closed
 
         # 托盘（线稿相机按物理像素渲染，随主题反色，贴近系统托盘图标风格）
         self.tray = QSystemTrayIcon(self._tray_icon())

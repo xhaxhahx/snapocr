@@ -209,7 +209,7 @@ class PreviewDialog(QWidget):
         bar.addWidget(self.btn_pin)
         self.btn_min = QPushButton(objectName="titleBtn")
         self.btn_min.setToolTip(tr("minimize"))
-        self.btn_min.clicked.connect(self.showMinimized)
+        self.btn_min.clicked.connect(self._minimize_or_finish)
         bar.addWidget(self.btn_min)
         self.btn_max = QPushButton(objectName="titleBtn")
         self.btn_max.clicked.connect(self._toggle_max)
@@ -339,6 +339,23 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
         self.btn_max.setIcon(QIcon(_icon_pm("restore" if _maxed else "maximize", t.icon)))
         self.btn_max.setToolTip(tr("restore") if _maxed else tr("maximize"))
         self.btn_close.setIcon(QIcon(_icon_pm("close_line", t.icon)))
+
+    def _minimize_or_finish(self):
+        """最小化 = 直接结束会话（2026-10-28 用户拍板）；钉住窗保留在任务栏。
+
+        无边框窗口（WS_POPUP，无 WS_MINIMIZEBOX）的 showMinimized 在 Windows
+        上等价 hide()——任务栏无法还原（2026-10-29 实测 vis=False 且非 iconic），
+        钉住态改走原生 SW_MINIMIZE；未钉住时 finished.emit 让宿主直接关窗，
+        不存在"最小化后回不来"的问题。
+        """
+        self.finished.emit()  # 宿主按 pinned 决定预览窗去留
+        if self.pinned and self.isVisible():
+            try:
+                import ctypes
+
+                ctypes.windll.user32.ShowWindow(int(self.winId()), 6)  # SW_MINIMIZE
+            except Exception:
+                self.showMinimized()
 
     def _toggle_max(self):
         """最大化/还原切换（自绘标题栏自带，原生标题栏才由系统处理）。"""
