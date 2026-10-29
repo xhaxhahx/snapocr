@@ -141,7 +141,7 @@ def main():
     if "--exit" in args:
         log.info("无运行实例，--exit 直接退出")
         return 0
-    # 自愈重启（docs/06 L2）：新进程等旧进程管道消失后再 listen——旧进程 quit 与
+    # 自愈重启（docs/15 L2）：新进程等旧进程管道消失后再 listen——旧进程 quit 与
     # 管道释放有几秒级窗口（OCR 线程收尾），直接 listen 会 removeServer 抢名冲突。
     if "--recycle" in args:
         import time as _time

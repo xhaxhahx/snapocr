@@ -5,7 +5,7 @@
 （Commit）不超过「启动基线 + 48MB」，超限时先软释放，仍超限则**自愈重启**
 （派生新进程接管后旧进程退出，全程 ≤3s，用户只看到一条托盘气泡）。
 
-状态机见 docs/06-内存治理实施计划书.md §3。busy 时本轮直接跳过——绝不打断
+状态机见 docs/15-内存治理实施计划书.md §3。busy 时本轮直接跳过——绝不打断
 正在进行的截屏/识别/任何可见窗口。
 """
 
@@ -19,7 +19,7 @@ from .logger import get_logger
 
 log = get_logger()
 
-# ---- 参数（docs/06 §3 参数表）----
+# ---- 参数（docs/15 §3 参数表）----
 CHECK_INTERVAL_S = 60
 SOFT_THRESHOLD_MB = 24  # 基线 + 24MB → 软释放
 HARD_THRESHOLD_MB = 48  # 基线 + 48MB → 自愈重启（硬上限）

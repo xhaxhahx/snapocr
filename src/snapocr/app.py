@@ -207,7 +207,7 @@ class CaptureController(QObject):
             ov.deleteLater()
         self.overlays = []
         self._restore_windows()
-        # 会话末顺手软释放（docs/06 L1-b）：OCR/抓屏路径的临时对象多为跨代引用，
+        # 会话末顺手软释放（docs/15 L1-b）：OCR/抓屏路径的临时对象多为跨代引用，
         # 不主动 collect 会滞留数轮；QPixmapCache 可能缓存标注/托盘位图。
         gc.collect()
         QPixmapCache.clear()
@@ -232,7 +232,7 @@ class CaptureController(QObject):
     def _preview_closed(self):
         """PreviewDialog.closeEvent 宿主钩子（挂在 QApplication 实例，见 SnapApp）。"""
         # 已关闭的预览窗立即摘出强引用表：其合成 QImage 可达全屏大小（~8MB），
-        # 留到下一轮会话结束才清会造成可观的滞留（docs/06 L1-c）。
+        # 留到下一轮会话结束才清会造成可观的滞留（docs/15 L1-c）。
         self._previews = [w for w in self._previews if w.isVisible()]
         self._maybe_quit_once()
 
@@ -271,7 +271,7 @@ class CaptureController(QObject):
         return False
 
     def _soft_release(self):
-        """看门狗 L1 软释放：空闲时回收可回收缓存（docs/06 §3）。
+        """看门狗 L1 软释放：空闲时回收可回收缓存（docs/15 §3）。
 
         释放引擎是其中最重的一步——空闲态用户无感（下次识别自动重载 ~1.2s）；
         会话中绝不调用（见 busy()）。
@@ -464,7 +464,7 @@ class SnapApp(QObject):
         # （此前钩子从未实现——once 模式"关掉钉住窗后进程不退出"，2026-10-29 补齐）。
         QApplication.instance().on_preview_closed = self.controller._preview_closed
 
-        # 内存看门狗（docs/06）：once 模式进程短命，无意义；托盘常驻才需要。
+        # 内存看门狗（docs/15）：once 模式进程短命，无意义；托盘常驻才需要。
         if not self.once:
             self._watchdog = MemoryWatchdog(
                 self,
@@ -683,7 +683,7 @@ class SnapApp(QObject):
         elif "--recycle" in a:  # 自愈通道：手动/看门狗触发的内存整理重启
             self._recycle_self()
 
-    # ---------- 自愈重启（docs/06 L2）----------
+    # ---------- 自愈重启（docs/15 L2）----------
     def _recycle_self(self):
         """派生新进程接管后本进程退出：内存回到初始化基线的最终兜底。
 
