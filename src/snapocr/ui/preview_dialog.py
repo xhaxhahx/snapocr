@@ -312,15 +312,14 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
         self.btn_retry.setToolTip(tr("retry_unavailable"))
 
     def _on_pin_toggled(self, pinned):
-        """钉住 = 不随截图任务关闭窗口，**不等于总在最前**（2026-10-28 用户澄清）。
+        """钉住 = 置顶并跨会话保留（2026-10-29 用户修订：钉住后前置于截图遮罩）。
 
-        钉住后取消 `WindowStaysOnTopHint`，否则它一直压在别的窗口上；未钉住时仍
-        置顶——那时它是截图流程的一部分，需要浮在遮罩之上。setWindowFlag 会让
-        Qt 隐藏窗口，因此随后必须重新 show。
+        StaysOnTop **恒为真**：遮罩本身是置顶全屏窗，非置顶窗无法稳定浮在其上——
+        旧实现钉住时撤掉置顶，预览窗立即被遮罩盖住，须退出截图才能看到。
+        置顶标记不再切换 → 不必 setWindowFlag 隐藏+重建原生窗口（少一次 WinId
+        抖动，UIA/窗口句柄更稳）。
         """
         self.pinned = bool(pinned)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, not self.pinned)
-        self.show()
         self.btn_pin.setToolTip(tr("unpin_tip") if self.pinned else tr("pin_tip"))
         self._update_title_icons()
 

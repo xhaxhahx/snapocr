@@ -135,6 +135,7 @@ class CaptureController(QObject):
             ov.finished.connect(self._on_finished)
             ov.cancelled.connect(self._on_finished)
             ov.previewClosed.connect(self._maybe_quit_once)
+            ov.raisePinnedRequested.connect(self._raise_pinned_previews)
             overlays.append(ov)
         if not overlays:
             self._restore_windows()
@@ -234,6 +235,20 @@ class CaptureController(QObject):
         # 留到下一轮会话结束才清会造成可观的滞留（docs/06 L1-c）。
         self._previews = [w for w in self._previews if w.isVisible()]
         self._maybe_quit_once()
+
+    def _raise_pinned_previews(self):
+        """遮罩激活到顶时重提钉住的预览窗，保证其始终前置于遮罩（用户 10-29 需求）。
+
+        仅 raise_（层级内抬升），零分配、零新引用；非钉住预览窗不提——它们
+        属于当前会话的确认流，被遮罩盖住是预期行为。
+        """
+        for w in QApplication.topLevelWidgets():
+            if (
+                isinstance(w, PreviewDialog)
+                and getattr(w, "pinned", False)
+                and w.isVisible()
+            ):
+                w.raise_()
 
     def busy(self) -> bool:
         """内存看门狗的"忙碌"判定：任一为真则本轮跳过，绝不清理/重启。

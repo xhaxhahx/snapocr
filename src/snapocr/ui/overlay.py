@@ -13,7 +13,7 @@ import contextlib
 import os
 import time
 
-from PyQt5.QtCore import QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import QLabel, QWidget
 
@@ -62,6 +62,8 @@ class OverlayWindow(QWidget):
     finished = pyqtSignal()  # 会话自然结束（完成/复制/保存后）
     selectionMoved = pyqtSignal()  # 选区被移动（用于关闭结果窗等联动）
     previewClosed = pyqtSignal()  # 钉住的预览窗被关闭（宿主需重新判定进程去留）
+    # 遮罩被激活（点击/热键呼出到顶，可能盖住钉住的预览窗）→ 宿主重提钉住窗
+    raisePinnedRequested = pyqtSignal()
 
     def __init__(self, screen, pm, cfg, ocr_busy_signal=None):
         super().__init__(
@@ -638,6 +640,10 @@ class OverlayWindow(QWidget):
                 self.press_pos = QPointF(pos)
                 self.sel = QRectF(self.drag_start, self.drag_start)
                 self.setCursor(self._cross_cursor)
+                # 重置 sel 后必须全量重绘：后续 mouseMove 的脏区只覆盖新框增长
+                # 轨迹，旧选区的边框/手柄/尺寸标签像素不会落在任何脏区里，
+                # 表现为"旧框不消失"（2026-10-29 用户实测截图）
+                self._update_all()
             self.press_pos = QPointF(pos)
             return
         # 框选开始
@@ -953,6 +959,13 @@ class OverlayWindow(QWidget):
             self.setCursor(Qt.ArrowCursor)  # 选区外用箭头
 
     # ---------- 动作 ----------
+    def changeEvent(self, ev):
+        # 遮罩被点击/呼出到顶（顶层层级内盖住钉住预览窗）→ 请求宿主重提钉住窗，
+        # 保证钉住的预览窗始终前置于遮罩（2026-10-29 用户需求）
+        if ev.type() == QEvent.ActivationChange and self.isActiveWindow():
+            self.raisePinnedRequested.emit()
+        super().changeEvent(ev)
+
     def hideEvent(self, ev):
         # 遮罩被关闭时兜底收掉预览窗，避免孤儿窗口——但**钉住态预览窗保留**：
         # 它已脱离会话（once 模式的进程去留由 previewClosed→_maybe_quit_once 判定）
