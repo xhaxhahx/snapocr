@@ -34,8 +34,14 @@ class _XClientMessageEvent(ctypes.Structure):
     ]
 
 
-def set_skip_taskbar(win_id: int) -> bool:
-    """给指定 X11 窗口设置 _NET_WM_STATE_SKIP_TASKBAR；成功返回 True。"""
+def set_skip_taskbar(win_id: int, mapped: bool = False) -> bool:
+    """给指定 X11 窗口设置 _NET_WM_STATE_SKIP_TASKBAR；成功返回 True。
+
+    mapped=False：map 前写初始属性（此时窗口还没有 WM 状态，可安全 Replace）。
+    mapped=True ：map 后只能发 ClientMessage ADD；若再 Replace 属性会把
+                  WM 刚设置的 _NET_WM_STATE_FULLSCREEN 一并冲掉，窗口退化为
+                  可用区 1035 高的最大化窗口，出现"双任务栏"（2026-10-29 用户实测）。
+    """
     if os.name == "nt" or not win_id:
         return False
     try:
@@ -75,8 +81,11 @@ def set_skip_taskbar(win_id: int) -> bool:
             skip = x11.XInternAtom(dpy, b"_NET_WM_STATE_SKIP_TASKBAR", 0)
             if not wm_state or not skip:
                 return False
-            state = (ctypes.c_ulong * 1)(skip)
-            x11.XChangeProperty(dpy, win_id, wm_state, _XA_ATOM, 32, _PROP_MODE_REPLACE, state, 1)
+            if not mapped:
+                state = (ctypes.c_ulong * 1)(skip)
+                x11.XChangeProperty(
+                    dpy, win_id, wm_state, _XA_ATOM, 32, _PROP_MODE_REPLACE, state, 1
+                )
             ev = _XClientMessageEvent()
             ev.type = _CLIENT_MESSAGE
             ev.display = dpy

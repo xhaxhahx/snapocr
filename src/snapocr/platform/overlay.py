@@ -18,10 +18,10 @@ def start_overlay(widget):
         return
     wayland = _is_wayland()
     if not wayland:
-        _x11_skip_taskbar(widget)
+        _x11_skip_taskbar(widget, mapped=False)
     widget.showFullScreen()
     if not wayland:
-        _x11_skip_taskbar(widget)  # map 后再补一次 ClientMessage
+        _x11_skip_taskbar(widget, mapped=True)  # map 后只发 ADD，不能覆盖 WM 状态
 
 
 def _is_wayland() -> bool:
@@ -30,11 +30,11 @@ def _is_wayland() -> bool:
     return is_wayland()
 
 
-def _x11_skip_taskbar(widget):
+def _x11_skip_taskbar(widget, mapped=False):
     try:
         from .x11 import set_skip_taskbar
 
-        set_skip_taskbar(int(widget.winId()))
+        set_skip_taskbar(int(widget.winId()), mapped=mapped)
     except Exception:
         pass
 
