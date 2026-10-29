@@ -87,6 +87,21 @@ else
 fi
 
 echo "[3/5] 生成 DEBIAN 脚本..."
+# preinst：升级/重装前先停掉旧常驻实例。否则内存看门狗的自愈重启可能在
+# dpkg 解包期间启动新进程，读到半写入的 PyInstaller 归档，表现为
+# zlib.error: incorrect header check（2026-10-29 用户反馈）。
+cat > "${PKGDIR}/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+set -e
+if [ -x /opt/snapocr/SnapOCR ]; then
+  /opt/snapocr/SnapOCR --exit >/dev/null 2>&1 || true
+fi
+pkill -x SnapOCR >/dev/null 2>&1 || true
+sleep 1
+exit 0
+EOF
+chmod 755 "${PKGDIR}/DEBIAN/preinst"
+
 cat > "${PKGDIR}/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
