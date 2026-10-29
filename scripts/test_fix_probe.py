@@ -696,6 +696,25 @@ def main():
         "旧的线稿相机图标已移除",
         "camera_line" not in _read_text(os.path.join(ROOT, "src", "snapocr", "ui", "icons.py")),
     )
+    ov_src = _read_text(os.path.join(ROOT, "src", "snapocr", "ui", "overlay.py"))
+    pov_src = _read_text(os.path.join(ROOT, "src", "snapocr", "platform", "overlay.py"))
+    x11_src = _read_text(os.path.join(ROOT, "src", "snapocr", "platform", "x11.py"))
+    check(
+        "看门狗内存整理全程静默（无托盘通知）",
+        "recycled.connect" not in app_src and "_notify_recycled" not in app_src,
+    )
+    check(
+        "所有提示走应用内 Toast（不产生系统通知/不改任务栏图标）",
+        "tray.showMessage" not in app_src and "self.toast.pop" in app_src,
+    )
+    check(
+        "截图遮罩全屏覆盖任务栏/Dock",
+        "start_overlay" in ov_src and "showFullScreen" in pov_src,
+    )
+    check(
+        "截图遮罩不进任务栏（X11 SKIP / Win TOOLWINDOW）",
+        "SKIP_TASKBAR" in x11_src and "WS_EX_TOOLWINDOW" in pov_src,
+    )
 
     # ---- OCR 结果窗「复制文字」反馈（第十二轮） ----
     rw = ResultWindow(cfg=cfg)

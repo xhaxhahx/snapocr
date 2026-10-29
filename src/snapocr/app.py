@@ -48,7 +48,7 @@ else:
 
 
 class ToastLabel(QLabel):
-    """屏幕中下方的轻提示。"""
+    """屏幕中下方的轻提示（应用内，不产生系统通知，不改变任务栏图标）。"""
 
     def __init__(self):
         super().__init__(
@@ -63,8 +63,21 @@ class ToastLabel(QLabel):
             "padding: 9px 18px; font-size: 13px;"
         )
         self.setScaledContents(False)
+        self._queue = []
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._advance)
 
     def pop(self, text, screen=None, msec=1600):
+        self._queue.append((text, screen, msec))
+        if not self.isVisible() and not self._timer.isActive():
+            self._show_next()
+
+    def _show_next(self):
+        if not self._queue:
+            self.hide()
+            return
+        text, screen, msec = self._queue.pop(0)
         self.setText(text)
         self.adjustSize()
         scr = screen or QApplication.primaryScreen()
@@ -72,7 +85,10 @@ class ToastLabel(QLabel):
         self.move(g.left() + (g.width() - self.width()) // 2, g.bottom() - self.height() - 60)
         self.show()
         self.raise_()
-        QTimer.singleShot(msec, self.hide)
+        self._timer.start(msec)
+
+    def _advance(self):
+        self._show_next()
 
 
 class CaptureController(QObject):
@@ -93,7 +109,6 @@ class CaptureController(QObject):
 
     # ---------- 截屏 ----------
     def start_capture(self):
-
         log.info("start_capture enter overlays=%s", len(self.overlays))
         if self.overlays:
             return  # 已在进行
@@ -243,11 +258,7 @@ class CaptureController(QObject):
         属于当前会话的确认流，被遮罩盖住是预期行为。
         """
         for w in QApplication.topLevelWidgets():
-            if (
-                isinstance(w, PreviewDialog)
-                and getattr(w, "pinned", False)
-                and w.isVisible()
-            ):
+            if isinstance(w, PreviewDialog) and getattr(w, "pinned", False) and w.isVisible():
                 w.raise_()
 
     def busy(self) -> bool:
@@ -263,12 +274,9 @@ class CaptureController(QObject):
             return True
         if getattr(self, "_settings", None) is not None and self._settings.isVisible():
             return True
-        if any(
-            isinstance(w, PreviewDialog) and w.isVisible()
-            for w in QApplication.topLevelWidgets()
-        ):
-            return True
-        return False
+        return any(
+            isinstance(w, PreviewDialog) and w.isVisible() for w in QApplication.topLevelWidgets()
+        )
 
     def _soft_release(self):
         """看门狗 L1 软释放：空闲时回收可回收缓存（docs/15 §3）。
@@ -472,7 +480,6 @@ class SnapApp(QObject):
                 soft_release=self.controller._soft_release,
                 do_recycle=self._recycle_self,
             )
-            self._watchdog.recycled.connect(self._notify_recycled)
             self._watchdog.start()
 
         # 托盘（线稿相机按物理像素渲染，随主题反色，贴近系统托盘图标风格）
@@ -504,12 +511,7 @@ class SnapApp(QObject):
 
         # 远程桌面：全局热键常被本地计算机截走，提示改用托盘点击
         if is_remote_session():
-            QTimer.singleShot(
-                900,
-                lambda: self.tray.showMessage(
-                    APP_DISPLAY, tr("rdp_hint"), QSystemTrayIcon.Information, 5000
-                ),
-            )
+            QTimer.singleShot(900, lambda: self.toast.pop(tr("rdp_hint"), msec=5000))
 
         # 屏幕热插拔/休眠唤醒/分辨率热变更：有活动遮罩会话时重建，
         # 避免界面停在旧拓扑或旧几何上（§33.1 A8：同屏改分辨率不触发增删信号）。
@@ -541,9 +543,8 @@ class SnapApp(QObject):
         # 热键（once 模式生命周期极短，不注册全局热键以免与常驻软件冲突）
         self.hotkey = HotkeyManager(self)
         self.hotkey.activated.connect(self.start_capture)
-        self.hotkey.error.connect(
-            lambda m: self.tray.showMessage(APP_DISPLAY, m, QSystemTrayIcon.Warning, 3000)
-        )
+        # 提示走应用内 Toast：系统托盘通知会让 Deepin 任务栏出现黄色“!”通知图标
+        self.hotkey.error.connect(lambda m: self.toast.pop(m, msec=5000))
         if self.once:
             log.info("once 模式：跳过全局热键注册")
         else:
@@ -555,12 +556,7 @@ class SnapApp(QObject):
         if show_tip:
             QTimer.singleShot(
                 800,
-                lambda: self.tray.showMessage(
-                    APP_DISPLAY,
-                    tr("first_run_tip", self.cfg.get("hotkey")),
-                    QSystemTrayIcon.Information,
-                    4000,
-                ),
+                lambda: self.toast.pop(tr("first_run_tip", self.cfg.get("hotkey")), msec=4000),
             )
 
     # ---------- 行为 ----------
@@ -649,16 +645,12 @@ class SnapApp(QObject):
         self._apply_hotkey()
         self.tray.setToolTip(tr("tray_tip", self.cfg.get("hotkey")))
         if hotkey_changed:
-            self.tray.showMessage(
-                APP_DISPLAY,
+            self.toast.pop(
                 tr("hotkey_changed", self.cfg.get("hotkey")),
-                QSystemTrayIcon.Information,
-                2500,
+                msec=3000,
             )
         else:
-            self.tray.showMessage(
-                APP_DISPLAY, tr("settings_saved"), QSystemTrayIcon.Information, 2500
-            )
+            self.toast.pop(tr("settings_saved"), msec=2500)
         if getattr(self, "_settings", None):
             self._settings.deleteLater()
             self._settings = None
@@ -671,7 +663,6 @@ class SnapApp(QObject):
             log.info(tr("windows_hint_wayland"))
 
     def _on_command(self, args):
-
         log.info("ipc command: %s", args)
         a = args or []
         if not a or "--capture" in a:  # 空命令（如直接双击 exe）也按截屏处理
@@ -696,9 +687,7 @@ class SnapApp(QObject):
                 argv = [sys.executable, "--hidden", "--resident", "--recycle"]
             else:
                 # 源码运行：python src/run.py --hidden --resident --recycle
-                script = os.path.abspath(
-                    os.path.join(os.path.dirname(__file__), "..", "run.py")
-                )
+                script = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "run.py"))
                 argv = [sys.executable, script, "--hidden", "--resident", "--recycle"]
             flags = 0
             if os.name == "nt":
@@ -716,12 +705,6 @@ class SnapApp(QObject):
             log.exception("自愈重启派生失败——放弃本次回收，看门狗下轮再试")
             return
         self.quit()
-
-    def _notify_recycled(self):
-        with contextlib.suppress(Exception):
-            self.tray.showMessage(
-                APP_DISPLAY, tr("recycle_done"), QSystemTrayIcon.Information, 2000
-            )
 
     def quit(self):
         with contextlib.suppress(Exception):

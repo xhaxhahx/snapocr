@@ -192,6 +192,16 @@ class EditorToolbar(QWidget):
         self.btn_cancel.setToolTip(tr("cancel") + " (Esc)")
         self.btn_cancel.clicked.connect(self.cancelClicked)
         rowA.addWidget(self.btn_cancel)
+        # 行A 纯文字按钮统一 26px：Linux 下 QToolButton 默认仅 13px，与带图标的
+        # 「编辑」按钮（固定 26）不齐（2026-10-29 UOS 实测）。
+        for _btn in (
+            self.btn_ocr,
+            self.btn_copy,
+            self.btn_copyfile,
+            self.btn_save,
+            self.btn_cancel,
+        ):
+            _btn.setFixedHeight(26)
         # 压缩多余空间到右侧：否则工具条宽度随行B变化时，行A按钮会被均分拉宽、间距变大
         rowA.addStretch(1)
 

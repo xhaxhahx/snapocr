@@ -17,6 +17,9 @@ from PyQt5.QtWidgets import QApplication
 
 TRIES = 3
 DELAY_MS = 100
+# GNOME/Deepin 文件管理器用该 MIME 区分"复制/剪切的文件"，并据此启用"粘贴"；
+# 仅 text/uri-list 时 Deepin 文件管理器粘贴项为灰色（2026-10-29 UOS 实测）。
+_GNOME_COPIED_MIME = "x-special/gnome-copied-files"
 
 
 def _pump(ms):
@@ -75,8 +78,42 @@ def _clip_dir() -> str:
 
 
 def cleanup_clip_files():
-    """清理"复制为文件"的上次残留（启动时调用；本会话刚写的文件不在此列）。"""
-    shutil.rmtree(os.path.join(tempfile.gettempdir(), "SnapOCR", "clipboard"), ignore_errors=True)
+    """清理上次残留；**保留当前剪贴板仍引用的文件**。
+
+    自愈重启（--recycle）时旧进程刚把文件写进剪贴板，若启动即整目录删除，
+    剪贴板里的 file:// URL 会指向不存在的路径，粘贴必然失败（2026-10-29 UOS 实测）。
+    """
+    d = os.path.join(tempfile.gettempdir(), "SnapOCR", "clipboard")
+    if not os.path.isdir(d):
+        return
+    keep = set()
+    try:
+        md = QGuiApplication.clipboard().mimeData()
+        if md is not None:
+            keep = {os.path.normpath(u.toLocalFile()) for u in md.urls()}
+    except Exception:
+        # 无 QApplication/剪贴板不可读：按无引用处理，退回旧的全量清理
+        pass
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(d, name)
+        if os.path.normpath(path) in keep:
+            continue
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                os.remove(path)
+        except OSError:
+            pass
+    try:
+        if not os.listdir(d):
+            os.rmdir(d)
+    except OSError:
+        pass
 
 
 def _unique_path(name: str) -> str:
@@ -94,21 +131,30 @@ def _unique_path(name: str) -> str:
 def _set_file(path: str) -> bool:
     """把文件以"文件复制"语义写入剪贴板（只带文件，不附带图像/文字数据），回读校验。"""
     md = QMimeData()
-    md.setUrls([QUrl.fromLocalFile(path)])
+    url = QUrl.fromLocalFile(path)
+    md.setUrls([url])
+    if os.name != "nt":
+        # Deepin/GNOME 文件管理器要求该格式才启用"粘贴"；内容为 copy + 换行 + file URI
+        md.setData(_GNOME_COPIED_MIME, b"copy\n" + bytes(url.toEncoded()))
     cb = QGuiApplication.clipboard()
     for i in range(max(1, TRIES)):
         try:
             cb.setMimeData(md)
             QApplication.processEvents()
             cur = cb.mimeData()
-            if (
+            ok = (
                 cur is not None
                 and cur.hasUrls()
                 # toLocalFile 返回正斜杠路径（Qt 规范化），与原生路径须按 normpath 比
                 and any(
                     os.path.normpath(u.toLocalFile()) == os.path.normpath(path) for u in cur.urls()
                 )
-            ):
+            )
+            if ok and os.name != "nt":
+                # 回读必须同时确认 Deepin 粘贴所需的 MIME，避免"看起来复制成功、
+                # 文件管理器却粘贴不了"的假成功（2026-10-29 UOS 实测）。
+                ok = bytes(cur.data(_GNOME_COPIED_MIME)).startswith(b"copy\n")
+            if ok:
                 return True
         except Exception:
             # 与 set_image 同策：占用/竞态交给下一轮重试

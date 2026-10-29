@@ -77,6 +77,7 @@ def main():
     ctl.result = None
     ctl.worker = None
     ctl._hiding = []
+    ctl._previews = []  # 钉住预览窗强引用表（10-29 新增，__new__ 夹具需同步）
     ov2 = OverlayWindow(
         scr, QPixmap.fromImage(_sample_image(1280, 720)), cfg=cfg, ocr_busy_signal=ctl.ocrPanel
     )
@@ -139,6 +140,14 @@ def main():
             ]
         ),
     )
+    # 收尾：等待全部 OCR 子线程（含选区移动后被 _detach_worker 断信号的旧线程），
+    # 否则进程退出时 QThread 仍在运行会触发 Qt abort（2026-10-29 门禁抖动实证）。
+    from PyQt5.QtCore import QThread as _QThread
+
+    for _th in ctl.findChildren(_QThread):
+        if _th.isRunning():
+            _th.wait(30000)
+    app.processEvents()
 
     # ---- T1.4 文字编辑框激活时交叉操作 ----
     ov3 = OverlayWindow(scr, QPixmap.fromImage(_sample_image(1280, 720)), cfg=cfg)

@@ -9,6 +9,7 @@
 """
 
 import os
+from typing import ClassVar
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
@@ -172,10 +173,10 @@ def is_hdr_active() -> bool:
         import ctypes.wintypes as wt
 
         class _LUID(ctypes.Structure):
-            _fields_ = [("LowPart", wt.DWORD), ("HighPart", wt.LONG)]
+            _fields_: ClassVar = [("LowPart", wt.DWORD), ("HighPart", wt.LONG)]
 
         class _PATH_SOURCE(ctypes.Structure):
-            _fields_ = [
+            _fields_: ClassVar = [
                 ("adapterId", _LUID),
                 ("id", wt.UINT),
                 ("modeInfoIdx", wt.UINT),
@@ -183,10 +184,10 @@ def is_hdr_active() -> bool:
             ]
 
         class _RATIONAL(ctypes.Structure):
-            _fields_ = [("Numerator", wt.UINT), ("Denominator", wt.UINT)]
+            _fields_: ClassVar = [("Numerator", wt.UINT), ("Denominator", wt.UINT)]
 
         class _PATH_TARGET(ctypes.Structure):
-            _fields_ = [
+            _fields_: ClassVar = [
                 ("adapterId", _LUID),
                 ("id", wt.UINT),
                 ("modeInfoIdx", wt.UINT),
@@ -200,14 +201,14 @@ def is_hdr_active() -> bool:
             ]
 
         class _PATH_INFO(ctypes.Structure):
-            _fields_ = [
+            _fields_: ClassVar = [
                 ("sourceInfo", _PATH_SOURCE),
                 ("targetInfo", _PATH_TARGET),
                 ("flags", wt.UINT),
             ]
 
         class _MODE_INFO(ctypes.Structure):
-            _fields_ = [
+            _fields_: ClassVar = [
                 ("infoType", wt.UINT),
                 ("id", wt.UINT),
                 ("adapterId", _LUID),
@@ -215,10 +216,15 @@ def is_hdr_active() -> bool:
             ]
 
         class _DEVICE_INFO_HEADER(ctypes.Structure):
-            _fields_ = [("type", wt.UINT), ("size", wt.UINT), ("adapterId", _LUID), ("id", wt.UINT)]
+            _fields_: ClassVar = [
+                ("type", wt.UINT),
+                ("size", wt.UINT),
+                ("adapterId", _LUID),
+                ("id", wt.UINT),
+            ]
 
         class _ADV_COLOR_INFO(ctypes.Structure):
-            _fields_ = [
+            _fields_: ClassVar = [
                 ("header", _DEVICE_INFO_HEADER),
                 ("value", wt.UINT),
                 ("colorEncoding", wt.UINT),

@@ -428,7 +428,9 @@ def run(ctx):
     ov_r1.show()
     app.processEvents()
     ov_r1.start()
-    QTest.qWait(30)
+    # 等 WM 淡入动画结束（UOS 约 100ms）：首次 grab 若落在半透明帧，
+    # repaint 后对比会误报"残留"。
+    QTest.qWait(150)
     ov_r1.mousePressEvent(_press(QPointF(200.0, 150.0)))
     for _i in range(8):
         ov_r1.mouseMoveEvent(_move(QPointF(200.0 + _i * 25, 150.0 + _i * 12)))
@@ -460,7 +462,8 @@ def run(ctx):
     ov_r3.show()
     app.processEvents()
     ov_r3.start()
-    QTest.qWait(30)
+    # 同 R1：等 WM 淡入动画结束，避免把半透明首帧误判为脏区残留。
+    QTest.qWait(150)
     ov_r3.mouseMoveEvent(_move(QPointF(302, 301)))  # 高亮变化帧（extra 脏区路径）
     QTest.qWait(16)
     ov_r3.mouseMoveEvent(_move(QPointF(304, 302)))  # 平滑帧（仅放大镜脏区）
@@ -505,9 +508,14 @@ def run(ctx):
     # ---- V2 重新框选后一致：颜色/粗细/字号/字体沿用工具条当前值 ----
     ov_v.toolbar.width_combo.setCurrentIndex(3)  # 加粗 16
     ov_v.toolbar.size_combo.setCurrentIndex(3)  # 32px
-    from PyQt5.QtGui import QFont
+    from PyQt5.QtGui import QFont, QFontDatabase
 
-    ov_v.toolbar.font_combo.setCurrentFont(QFont("Arial"))
+    # Windows 自带 Arial，Linux 信创环境未必有：选一个本机实际存在的字体，
+    # 验证"重新框选后沿用工具条当前字体"，而不是验证某款字体是否安装。
+    _cur_font = ov_v.toolbar.font_combo.currentFont().family()
+    _other_font = next((f for f in QFontDatabase().families() if f != _cur_font), _cur_font)
+    ov_v.toolbar.font_combo.setCurrentFont(QFont(_other_font))
+    _expected_font = ov_v.toolbar.font_combo.currentFont().family()
     ov_v._on_color("#34c759")  # 与色板弹窗同一路径：改色片+画布+cfg
     app.processEvents()
     ov_v._teardown_canvas()
@@ -519,7 +527,7 @@ def run(ctx):
         and ov_v.toolbar.btn_color._hex == "#34c759"
         and ov_v.canvas.line_width == 16
         and ov_v.canvas.text_size == 32
-        and ov_v.canvas.text_font == "Arial"
+        and ov_v.canvas.text_font == _expected_font
     )
     check("V2 重新框选后颜色/粗细/字号/字体一致", v2)
     ov_v._teardown_canvas()
@@ -688,6 +696,12 @@ def run(ctx):
         and not md_y.hasImage()
     )
     check("Y1 图片复制为JPG文件(仅文件形态)", y1)
+    if os.name != "nt":
+        xs_y = bytes(md_y.data("x-special/gnome-copied-files"))
+        check(
+            "Y1b Linux 文件剪贴板含 x-special(Deepin 可粘贴)",
+            xs_y.startswith(b"copy\n") and b"file://" in xs_y,
+        )
 
     # Y2 文本复制为 TXT 文件：utf-8-sig 内容 + 文件 URL
     p2 = clipmod.copy_text_as_file("中文内容 Y2", "y文本")
@@ -732,7 +746,8 @@ def run(ctx):
     pvy.deleteLater()
     check("Y4 三处按钮+可用态同步", y4 and y4b and y4c)
 
-    # Y5 启动清理接线 + i18n 双语齐备；清掉探针刚写的文件（不留垃圾）
+    # Y5 启动清理：当前剪贴板引用的文件必须保留（自愈重启后仍可粘贴），
+    # 无引用的残留才删除；同时校验启动接线与 i18n 双语齐备。
     y5 = (
         "cleanup_clip_files" in _src("src/snapocr/main.py")
         and _i18n._ZH.get("copy_as_file") is not None
@@ -740,9 +755,17 @@ def run(ctx):
         and _i18n._EN.get("default_filename_jpg") == "screenshot_%s.jpg"
         and _i18n._ZH.get("default_filename_jpg") == "截图_%s.jpg"
     )
+    p5 = clipmod.copy_text_as_file("保留内容", "y保留")
     clipmod.cleanup_clip_files()
-    y5 = y5 and not os.path.exists(os.path.dirname(p1))
-    check("Y5 启动清理+i18n双语齐备", y5)
+    y5_keep = p5 is not None and os.path.isfile(p5)
+    cb_y.clear()
+    app.processEvents()
+    clipmod.cleanup_clip_files()
+    y5_clean = not os.path.exists(os.path.dirname(p1))
+    check(
+        "Y5 启动清理保留引用+清理残留+i18n双语齐备",
+        y5 and y5_keep and y5_clean,
+    )
     # ---- Z1~Z12 已拆分到 probes/ui_suite.py（原文件 1,115 行超 800 上限）----
     from probes.ui_suite import run as run_ui
 

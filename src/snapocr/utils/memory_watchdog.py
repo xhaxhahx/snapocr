@@ -3,15 +3,15 @@
 
 场景：永不关机、本应用永不关闭、每天重度使用的固定性能机器。要求常驻内存
 （Commit）不超过「启动基线 + 48MB」，超限时先软释放，仍超限则**自愈重启**
-（派生新进程接管后旧进程退出，全程 ≤3s，用户只看到一条托盘气泡）。
+（派生新进程接管后旧进程退出，全程 ≤3s，**全程静默、不弹任何通知**）。
 
 状态机见 docs/15-内存治理实施计划书.md §3。busy 时本轮直接跳过——绝不打断
 正在进行的截屏/识别/任何可见窗口。
 """
 
-import gc
 import os
 import time
+from typing import ClassVar
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
@@ -35,11 +35,10 @@ BASELINE_SAMPLES_S = (10, 25, 45)
 def _commit_mb_win() -> float:
     """Windows：Commit（PagedMemorySize64，含私有提交页，比 WS 稳定）。"""
     import ctypes
-
     from ctypes import wintypes
 
     class PMC(ctypes.Structure):
-        _fields_ = [
+        _fields_: ClassVar = [
             ("cb", wintypes.DWORD),
             ("PageFaultCount", wintypes.DWORD),
             ("PeakWorkingSetSize", ctypes.c_size_t),
@@ -130,9 +129,7 @@ class MemoryWatchdog(QObject):
         """基线 min-tracking，带骤降守卫：读数较基线腰斩 = 进程退出伪影
         （旧实例关闭途中定时器最后一跳，Commit 已被系统回收），不得采信。"""
         if self._baseline is not None and cur < self._baseline * 0.5:
-            log.warning(
-                "内存读数骤降 %.1f→%.1fMB，视为退出伪影忽略", self._baseline, cur
-            )
+            log.warning("内存读数骤降 %.1f→%.1fMB，视为退出伪影忽略", self._baseline, cur)
             return
         self._baseline = min(self._baseline, cur) if self._baseline else cur
         log.info("内存看门狗基线: %.1fMB", self._baseline)
@@ -168,9 +165,7 @@ class MemoryWatchdog(QObject):
         if over_hard and self._over_hard >= CONFIRM_TIMES:
             since = time.monotonic() - self._last_recycle
             if since >= MIN_RECYCLE_INTERVAL_S:
-                log.warning(
-                    "内存 %.1fMB 连续 %d 次超硬阈值 → 自愈重启", cur, self._over_hard
-                )
+                log.warning("内存 %.1fMB 连续 %d 次超硬阈值 → 自愈重启", cur, self._over_hard)
                 self._last_recycle = time.monotonic()
                 self._over_hard = 0
                 self.recycled.emit()

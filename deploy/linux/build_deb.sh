@@ -10,6 +10,7 @@
 # 说明:
 #   PyInstaller 不能跨 glibc/架构交叉打包，本脚本必须在目标同级系统上运行。
 #   推荐在 Debian 10(buster)/UOS20 容器中执行，产物可覆盖 glibc>=2.28。
+#   非 .venv 构建环境可用 PYINSTALLER=/path/to/pyinstaller 覆盖。
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -17,9 +18,10 @@ ARCH="${2:-amd64}"
 VERSION="1.0.0"
 WORK="dist/linux-${ARCH}"
 PKGDIR="${WORK}/snapocr_${VERSION}_${ARCH}"
+PYINSTALLER="${PYINSTALLER:-.venv/bin/pyinstaller}"
 
 echo "[1/5] PyInstaller 打包 (Linux)..."
-.venv/bin/pyinstaller --noconfirm --clean deploy/snapocr-linux.spec
+"$PYINSTALLER" --noconfirm --clean deploy/snapocr-linux.spec
 
 echo "[2/5] 组装 deb 目录..."
 rm -rf "$PKGDIR"

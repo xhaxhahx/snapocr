@@ -389,10 +389,8 @@ def run(ctx):
     _cw.show()
     app.processEvents()
     _cw._open_text_edit(QPointF(100, 100))
-    app.processEvents()
-    from PyQt5.QtTest import QTest as _QT2
-
-    _QT2.qWait(150)  # 等首次绘制完成，否则 grab 到未渲染的画面
+    # 先取输入框再跑事件循环：失焦会自动提交并销毁输入框（FocusOut 契约），
+    # 探针在窗口未激活时会偶发读到 None（2026-10-29 门禁抖动实证）。
     _te = _cw._text_edit
     _css = _te.styleSheet() if _te is not None else ""
     check("Z12a 输入框背景透明", "background: transparent" in _css)
@@ -400,7 +398,7 @@ def run(ctx):
     check("Z12c 输入框隐藏滚动条", "QScrollBar" in _css and "width: 0" in _css)
     # 像素级：框内空白行必须与底图同色（避开文字行）
     if _te is not None:
-        _pg = _cw.grab().toImage()
+        _pg = _cw.grab().toImage()  # grab 同步触发绘制，不依赖 qWait
         # grab() 返回设备像素图，而 _te 的坐标是逻辑坐标，dpr≠1 时必须换算。
         # 用图自身的 dpr：cw.dpr 是构造参数（探针传 1.0），未必等于屏幕 dpr。
         _pdpr = _pg.devicePixelRatio() or 1.0
@@ -809,15 +807,15 @@ def run(ctx):
     check("Z18a 样式/调色板照搬结果窗且明暗同步", _ok18)
     check("Z18a2 自动填充背景（原生绘制部分也跟主题）", _pv18.autoFillBackground())
 
-    # b) 钉住 ≠ 总在最前：钉住取消置顶，取消钉住恢复置顶
+    # b) 钉住 = 置顶 + 跨会话保留（2026-10-29 用户修订：钉住后仍前置于遮罩）
     _pv18.btn_pin.setChecked(True)
     _QT14.qWait(60)
     _top_pinned = bool(_pv18.windowFlags() & Qt.WindowStaysOnTopHint)
     _pv18.btn_pin.setChecked(False)
     _QT14.qWait(60)
     _top_normal = bool(_pv18.windowFlags() & Qt.WindowStaysOnTopHint)
-    check("Z18b 钉住后取消置顶（钉住≠最前）", not _top_pinned)
-    check("Z18b2 取消钉住后恢复置顶", _top_normal)
+    check("Z18b 钉住保持置顶（钉住=最前+跨会话）", _top_pinned)
+    check("Z18b2 取消钉住后仍置顶（预览流在遮罩之上）", _top_normal)
 
     # c) 钉住时再次截图不隐藏：验证 start_capture 的排除条件成立
     _pv18.btn_pin.setChecked(True)

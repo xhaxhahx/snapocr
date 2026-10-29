@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import QLabel, QWidget
 
 from ..i18n import tr
 from ..platform import windowdetect
+from ..platform.overlay import start_overlay
 from . import clipboard as clip
 from . import theme
 from .clipboard import ask_filename as _ask_filename
@@ -183,7 +184,8 @@ class OverlayWindow(QWidget):
         lp = self.mapFromGlobal(QCursor.pos())
         if self.rect().contains(lp):
             self._mouse_pos = QPointF(lp)
-        self.show()
+        # 平台差异（Windows 任务栏项 / Linux 全屏与 SKIP_TASKBAR）收在 platform/overlay.py
+        start_overlay(self)
         self.raise_()
         self.activateWindow()
         self.setFocus(Qt.ActiveWindowFocusReason)

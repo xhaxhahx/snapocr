@@ -61,6 +61,20 @@ def _keep_qt_data(entry):
 
 a.datas = [d for d in a.datas if _keep_qt_data(d)]
 
+# 系统库：conda 构建的 libfontconfig 编译期前缀为 /.tmp/py311/etc/fonts，打包后
+# 找不到 fonts.conf（启动告警，且可能回落到无系统字体）。改用目标机系统
+# libfontconfig1（deb Depends 已声明），字体配置/中文回退才与系统一致。
+_EXCLUDE_LIBS = ("libfontconfig.so.1",)
+
+
+def _keep_lib(entry):
+    names = {os.path.basename(str(x)) for x in entry[:2]}
+    return not (names & set(_EXCLUDE_LIBS))
+
+
+a.binaries = [b for b in a.binaries if _keep_lib(b)]
+a.datas = [d for d in a.datas if _keep_lib(d)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="SnapOCR",

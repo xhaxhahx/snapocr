@@ -4,6 +4,7 @@
 import contextlib
 import os
 import threading
+from typing import ClassVar
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
@@ -133,7 +134,7 @@ class HotkeyManager(QObject):
         x11.XSync(dpy, False)
 
         class XKeyEvent(ctypes.Structure):
-            _fields_ = [
+            _fields_: ClassVar = [
                 ("type", ctypes.c_int),
                 ("serial", ctypes.c_ulong),
                 ("send_event", ctypes.c_int),
