@@ -476,6 +476,7 @@ class SnapApp(QObject):
         if not self.once:
             self._watchdog = MemoryWatchdog(
                 self,
+                cfg_get=self.cfg.get,
                 is_busy=self.controller.busy,
                 soft_release=self.controller._soft_release,
                 do_recycle=self._recycle_self,

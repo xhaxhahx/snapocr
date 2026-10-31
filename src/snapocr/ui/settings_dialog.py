@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -116,6 +117,28 @@ class SettingsDialog(QWidget):
         f2.addRow(tr("threads"), self.threads_spin)
         root.addWidget(g2)
 
+        # --- 内存管理组（docs/15：自动整理策略用户可配，2026-11-01）---
+        gm = QGroupBox(tr("mem_group"))
+        fmem = QFormLayout(gm)
+        self.mem_mode_combo = EdgeAwareComboBox()
+        self.mem_mode_combo.addItem(tr("mem_mode_off"), "off")
+        self.mem_mode_combo.addItem(tr("mem_mode_threshold"), "threshold")
+        self.mem_mode_combo.addItem(tr("mem_mode_time"), "time")
+        fmem.addRow(tr("mem_mode_label"), self.mem_mode_combo)
+        self.mem_threshold_spin = QSpinBox()
+        self.mem_threshold_spin.setRange(10, 500)
+        self.mem_threshold_spin.setSuffix(" MB")
+        fmem.addRow(tr("mem_threshold_label"), self.mem_threshold_spin)
+        self.mem_interval_spin = QSpinBox()
+        self.mem_interval_spin.setRange(5, 1440)
+        self.mem_interval_spin.setSuffix(tr("mem_min_unit"))
+        fmem.addRow(tr("mem_interval_label"), self.mem_interval_spin)
+        mem_hint = QLabel(tr("mem_hint"))
+        mem_hint.setWordWrap(True)
+        fmem.addRow(mem_hint)
+        root.addWidget(gm)
+        self.mem_mode_combo.currentIndexChanged.connect(self._mem_mode_changed)
+
         # --- 路径管理组（默认保存目录单列；2026-10-29 从"界面"组拆出）---
         g3 = QGroupBox(tr("paths_group"))
         f3 = QFormLayout(g3)
@@ -169,9 +192,20 @@ class SettingsDialog(QWidget):
             {1.0: 0, 1.5: 1, 2.0: 2}.get(float(c.get("ocr_small_scale", 1.0)), 0)
         )
         self.threads_spin.setValue(int(c.get("ocr_threads", 0)))
+        self.mem_mode_combo.setCurrentIndex(
+            {"off": 0, "threshold": 1, "time": 2}.get(c.get("mem_mode", "threshold"), 1)
+        )
+        self.mem_threshold_spin.setValue(int(c.get("mem_threshold_mb", 30)))
+        self.mem_interval_spin.setValue(int(c.get("mem_interval_min", 60)))
         self.dir_edit.setText(c.get("save_dir") or "")
         # 马赛克块大小不再属于设置页：已迁至截图工具条（马赛克工具激活时出现）
         self.lang_combo.setCurrentIndex({"": 0, "zh": 1, "en": 2}.get(c.get("lang", ""), 0))
+
+    def _mem_mode_changed(self, _i=None):
+        """模式联动：阈值/间隔两个输入框只在对应模式下可用。"""
+        mode = self.mem_mode_combo.currentData()
+        self.mem_threshold_spin.setEnabled(mode == "threshold")
+        self.mem_interval_spin.setEnabled(mode == "time")
 
     def showEvent(self, ev):
         theme.apply_window_chrome(self, dark_title=theme.current().dark)
@@ -220,6 +254,9 @@ class SettingsDialog(QWidget):
         self.cfg.set("ocr_release_after", self.release_cb.isChecked())
         self.cfg.set("ocr_small_scale", float(self.scale_combo.currentData()))
         self.cfg.set("ocr_threads", int(self.threads_spin.value()))
+        self.cfg.set("mem_mode", self.mem_mode_combo.currentData() or "threshold")
+        self.cfg.set("mem_threshold_mb", int(self.mem_threshold_spin.value()))
+        self.cfg.set("mem_interval_min", int(self.mem_interval_spin.value()))
         self.cfg.set("save_dir", self.dir_edit.text().strip())
         # mosaic_block 由截图工具条写入（设置页不再经手，避免两处入口互覆）
         self.cfg.set("lang", self.lang_combo.currentData() or "")

@@ -19,7 +19,10 @@ DEFAULTS = {
     "ocr_max_dim": 4000,  # 送推理前最长边钳制，防超大图内存峰值
     "ocr_release_after": False,  # 识别后释放模型（低配机省内存）
     "pen_color": "#ff3b30",
-    "mosaic_block": 10,  # 马赛克块大小(设备像素)
+    "mosaic_block": 10,  # 马赛克块大小(设备像素)；设置入口在截图工具条（马赛克激活时）
+    "mem_mode": "threshold",  # 内存自动整理：threshold=按内存阈值 / time=按时间间隔 / off=关闭
+    "mem_threshold_mb": 30,  # 阈值模式触发线：高于初始化基线多少 MB（用户可调）
+    "mem_interval_min": 60,  # 时间模式整理间隔（分钟）
     "autostart_shown_tip": False,  # 首次运行提示已展示（须进 DEFAULTS 才会被 load() 回读）
     "result_win_w": 480,  # 结果窗上次尺寸（U8，关闭时回写）
     "result_win_h": 400,

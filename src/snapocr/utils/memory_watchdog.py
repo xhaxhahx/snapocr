@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
-"""内存看门狗：三层防线的 L2 兜底。
+"""内存看门狗：三层防线的 L2 兜底，行为由设置页「内存管理」组驱动（docs/15）。
 
-场景：永不关机、本应用永不关闭、每天重度使用的固定性能机器。要求常驻内存
-（Commit）不超过「启动基线 + 48MB」，超限时先软释放，仍超限则**自愈重启**
-（派生新进程接管后旧进程退出，全程 ≤3s，**全程静默、不弹任何通知**）。
+模式（cfg: mem_mode）：
+- threshold（默认）：空闲时 Commit > 基线 + mem_threshold_mb → 软释放；
+  仍超限且连续 2 次 → 自愈重启（回到初始化基线的最终兜底）
+- time：空闲时距上次整理 ≥ mem_interval_min 分钟 → 软释放 + 自愈重启（彻底回基线）
+- off：不整理
 
-状态机见 docs/15-内存治理实施计划书.md §3。busy 时本轮直接跳过——绝不打断
-正在进行的截屏/识别/任何可见窗口。
+busy 时整个周期跳过——绝不打断正在进行的截屏/识别/任何可见窗口。
 """
 
+import gc
 import os
 import time
-from typing import ClassVar
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
@@ -19,26 +20,20 @@ from .logger import get_logger
 
 log = get_logger()
 
-# ---- 参数（docs/15 §3 参数表）----
-CHECK_INTERVAL_S = 60
-SOFT_THRESHOLD_MB = 24  # 基线 + 24MB → 软释放
-HARD_THRESHOLD_MB = 48  # 基线 + 48MB → 自愈重启（硬上限）
-CONFIRM_TIMES = 2  # 连续超硬阈值次数（防抖）
-MIN_RECYCLE_INTERVAL_S = 3600  # 两次自愈重启最小间隔（防风暴）
-BASELINE_DELAY_S = 45  # 基线最晚采样点（见下）
-# 基线多点采样：基线必须落在**任何用户操作之前**，否则首轮 OCR 的 arena 增长会
-# 把基线抬高、看门狗永不触发（实测教训）。10s/25s/45s 三点取最低——10s 时初始化
-# 已完成（引擎懒加载），用户几乎不可能在 10s 内完成一次带 OCR 的会话。
-BASELINE_SAMPLES_S = (10, 25, 45)
+CHECK_INTERVAL_S = 30  # 采样周期（用户阈值可低至 10MB，30s 保证响应）
+CONFIRM_TIMES = 2  # 阈值模式：连续超限次数（防抖）
+MIN_RECYCLE_INTERVAL_S = 300  # 两次自愈重启最小间隔（防风暴，用户模式下的底线）
+BASELINE_SAMPLES_S = (10, 25, 45)  # 基线多点采样（取最低；10s 时初始化已完成）
 
 
 def _commit_mb_win() -> float:
-    """Windows：Commit（PagedMemorySize64，含私有提交页，比 WS 稳定）。"""
+    """Windows：Commit（PagefileUsage，含私有提交页，比 WS 稳定）。"""
     import ctypes
+
     from ctypes import wintypes
 
     class PMC(ctypes.Structure):
-        _fields_: ClassVar = [
+        _fields_ = [
             ("cb", wintypes.DWORD),
             ("PageFaultCount", wintypes.DWORD),
             ("PeakWorkingSetSize", ctypes.c_size_t),
@@ -92,19 +87,20 @@ def commit_mb() -> float:
 
 
 class MemoryWatchdog(QObject):
-    """采样 → 软释放 → 自愈重启 的状态机。busy 时整个周期跳过。"""
+    """采样 → 软释放 → 自愈重启 的状态机（模式/阈值/间隔由设置页配置）。"""
 
     softReleased = pyqtSignal(float)  # 软释放后的 Commit（MB）
     recycled = pyqtSignal()  # 即将自愈重启（宿主应立即派生新进程并退出）
 
-    def __init__(self, parent, is_busy, soft_release, do_recycle):
+    def __init__(self, parent, cfg_get, is_busy, soft_release, do_recycle):
         super().__init__(parent)
+        self._cfg_get = cfg_get  # (key, default) -> 值：每次检查实时读设置
         self._is_busy = is_busy  # () -> bool：会话/识别/任何可见窗口进行中
         self._soft_release = soft_release  # () -> None
         self._do_recycle = do_recycle  # () -> None
         self._baseline = None  # 历史最低 Commit（防阈值漂移）
-        self._over_hard = 0  # 连续超硬阈值计数
-        self._last_recycle = 0.0  # monotonic
+        self._over_count = 0  # 阈值模式：连续超限计数
+        self._last_recycle = 0.0  # monotonic；start() 时锚定为启动时刻
         self._timer = QTimer(self)
         self._timer.setInterval(CHECK_INTERVAL_S * 1000)
         self._timer.timeout.connect(self._check)
@@ -112,6 +108,7 @@ class MemoryWatchdog(QObject):
     def start(self):
         if os.environ.get("SNAPOCR_NO_WATCHDOG"):  # 测试逃生口
             return
+        self._last_recycle = time.monotonic()  # 时间模式：从启动起算间隔
         # 多点采基线（取最低），随后进入周期采样
         for s in BASELINE_SAMPLES_S:
             QTimer.singleShot(s * 1000, self._sample_baseline)
@@ -129,7 +126,9 @@ class MemoryWatchdog(QObject):
         """基线 min-tracking，带骤降守卫：读数较基线腰斩 = 进程退出伪影
         （旧实例关闭途中定时器最后一跳，Commit 已被系统回收），不得采信。"""
         if self._baseline is not None and cur < self._baseline * 0.5:
-            log.warning("内存读数骤降 %.1f→%.1fMB，视为退出伪影忽略", self._baseline, cur)
+            log.warning(
+                "内存读数骤降 %.1f→%.1fMB，视为退出伪影忽略", self._baseline, cur
+            )
             return
         self._baseline = min(self._baseline, cur) if self._baseline else cur
         log.info("内存看门狗基线: %.1fMB", self._baseline)
@@ -137,36 +136,52 @@ class MemoryWatchdog(QObject):
     def _check(self):
         if self._is_busy():
             return  # 会话/识别/可见窗口进行中：绝不打扰
+        mode = self._cfg_get("mem_mode", "threshold")
+        if mode == "off":
+            return
         cur = commit_mb()
         if cur <= 0:
             return
         if self._baseline is not None and cur < self._baseline * 0.5:
-            # 骤降：退出伪影（见 _accept），同时把基线复位到当前真实值
-            log.warning("检查发现基线失真，重置为 %.1fMB", cur)
-            self._baseline = cur
+            # 骤降（腰斩级）= 读取伪影（如宿主进程异常回收）：忽略本轮并保持基线，
+            # 活进程内不会出现合法的腰斩级回落，基线绝不被伪影拉低
+            log.warning("内存读数骤降 %.1f→%.1fMB，忽略本轮", self._baseline, cur)
             return
         self._accept(cur)  # 基线取历史最低（带骤降守卫）
         if self._baseline is None:
             return
-        over_soft = cur - self._baseline > SOFT_THRESHOLD_MB
-        over_hard = cur - self._baseline > HARD_THRESHOLD_MB
-        if over_soft:
-            log.info("内存超软阈值: %.1fMB (基线 %.1f)", cur, self._baseline)
+
+        if mode == "time":
+            interval_s = max(5, int(self._cfg_get("mem_interval_min", 60))) * 60
+            if time.monotonic() - self._last_recycle >= interval_s:
+                log.info("内存整理（按时间，间隔 %d 分钟）", interval_s // 60)
+                self._do_reclaim()
+            return
+
+        # ---- threshold 模式（默认）----
+        limit = self._baseline + max(10, int(self._cfg_get("mem_threshold_mb", 30)))
+        if cur > limit:
+            log.info("内存超阈值: %.1fMB (基线 %.1f + %d)", cur, self._baseline,
+                     max(10, int(self._cfg_get("mem_threshold_mb", 30))))
             self._soft_release()
             cur = commit_mb()
             self.softReleased.emit(cur)
-            # 软释放后重新判定硬阈值
-            over_soft = cur - self._baseline > SOFT_THRESHOLD_MB
-            over_hard = cur - self._baseline > HARD_THRESHOLD_MB
-        if over_hard:
-            self._over_hard += 1
+        if cur > limit:
+            self._over_count += 1
         else:
-            self._over_hard = 0
-        if over_hard and self._over_hard >= CONFIRM_TIMES:
+            self._over_count = 0
+        if self._over_count >= CONFIRM_TIMES:
             since = time.monotonic() - self._last_recycle
             if since >= MIN_RECYCLE_INTERVAL_S:
-                log.warning("内存 %.1fMB 连续 %d 次超硬阈值 → 自愈重启", cur, self._over_hard)
+                log.warning("内存 %.1fMB 连续 %d 次超阈值 → 自愈重启", cur, self._over_count)
                 self._last_recycle = time.monotonic()
-                self._over_hard = 0
+                self._over_count = 0
                 self.recycled.emit()
                 self._do_recycle()
+
+    def _do_reclaim(self):
+        """时间模式的整理动作：软释放 + 自愈重启（彻底回到初始化基线）。"""
+        self._last_recycle = time.monotonic()
+        self._soft_release()
+        self.recycled.emit()
+        self._do_recycle()
