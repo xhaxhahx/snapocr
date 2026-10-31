@@ -116,8 +116,8 @@ class SettingsDialog(QWidget):
         f2.addRow(tr("threads"), self.threads_spin)
         root.addWidget(g2)
 
-        # --- 保存/界面组 ---
-        g3 = QGroupBox(tr("ui_group"))
+        # --- 路径管理组（默认保存目录单列；2026-10-29 从"界面"组拆出）---
+        g3 = QGroupBox(tr("paths_group"))
         f3 = QFormLayout(g3)
         dirrow = QHBoxLayout()
         self.dir_edit = QLineEdit()
@@ -127,15 +127,17 @@ class SettingsDialog(QWidget):
         dirrow.addWidget(self.dir_edit, 1)
         dirrow.addWidget(browse)
         f3.addRow(tr("save_dir"), dirrow)
-        self.mosaic_spin = QSpinBox()
-        self.mosaic_spin.setRange(6, 40)
-        f3.addRow(tr("mosaic_block"), self.mosaic_spin)
+        root.addWidget(g3)
+
+        # --- 界面组（语言；马赛克块大小已迁至截图工具条，马赛克工具激活时出现）---
+        g4 = QGroupBox(tr("ui_group"))
+        f4 = QFormLayout(g4)
         self.lang_combo = EdgeAwareComboBox()
         self.lang_combo.addItem(tr("lang_default"), "")
         self.lang_combo.addItem("中文", "zh")
         self.lang_combo.addItem("English", "en")
-        f3.addRow(tr("language"), self.lang_combo)
-        root.addWidget(g3)
+        f4.addRow(tr("language"), self.lang_combo)
+        root.addWidget(g4)
 
         root.addStretch(1)
 
@@ -168,7 +170,7 @@ class SettingsDialog(QWidget):
         )
         self.threads_spin.setValue(int(c.get("ocr_threads", 0)))
         self.dir_edit.setText(c.get("save_dir") or "")
-        self.mosaic_spin.setValue(int(c.get("mosaic_block", 10)))
+        # 马赛克块大小不再属于设置页：已迁至截图工具条（马赛克工具激活时出现）
         self.lang_combo.setCurrentIndex({"": 0, "zh": 1, "en": 2}.get(c.get("lang", ""), 0))
 
     def showEvent(self, ev):
@@ -208,8 +210,9 @@ class SettingsDialog(QWidget):
         self._reload_widgets()
 
     def _apply(self):
-        # 清空热键回落到默认值（而非莫名塞成 F4）
-        new_hotkey = self.hotkey_edit.text().strip() or DEFAULTS["hotkey"]
+        # 热键允许留空 = 不启用全局快捷键（2026-10-29 需求：初始无热键，用户
+        # 在设置里录入并保存后才生效；删除/清空后保存即注销）。不再回落默认值。
+        new_hotkey = self.hotkey_edit.text().strip()
         hotkey_changed = new_hotkey != self._old_hotkey
         self.cfg.set("hotkey", new_hotkey)
         self.cfg.set("autostart", self.autostart_cb.isChecked())
@@ -218,7 +221,7 @@ class SettingsDialog(QWidget):
         self.cfg.set("ocr_small_scale", float(self.scale_combo.currentData()))
         self.cfg.set("ocr_threads", int(self.threads_spin.value()))
         self.cfg.set("save_dir", self.dir_edit.text().strip())
-        self.cfg.set("mosaic_block", int(self.mosaic_spin.value()))
+        # mosaic_block 由截图工具条写入（设置页不再经手，避免两处入口互覆）
         self.cfg.set("lang", self.lang_combo.currentData() or "")
         # 语言切换即时生效（已打开窗口需各自的 retranslate，新开窗口立即跟随）
         from ..i18n import init_lang

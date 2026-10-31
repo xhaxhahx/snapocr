@@ -484,7 +484,7 @@ class SnapApp(QObject):
 
         # 托盘（线稿相机按物理像素渲染，随主题反色，贴近系统托盘图标风格）
         self.tray = QSystemTrayIcon(self._tray_icon())
-        self.tray.setToolTip(tr("tray_tip", self.cfg.get("hotkey")))
+        self.tray.setToolTip(self._tray_tip())
         menu = QMenu()
         act_capture = menu.addAction(tr("capture"))
         act_capture.triggered.connect(self.start_capture)
@@ -556,7 +556,12 @@ class SnapApp(QObject):
         if show_tip:
             QTimer.singleShot(
                 800,
-                lambda: self.toast.pop(tr("first_run_tip", self.cfg.get("hotkey")), msec=4000),
+                lambda: self.toast.pop(
+                    tr("first_run_tip", self.cfg.get("hotkey"))
+                    if self.cfg.get("hotkey")
+                    else tr("first_run_tip_nokey"),
+                    msec=4000,
+                ),
             )
 
     # ---------- 行为 ----------
@@ -641,12 +646,19 @@ class SnapApp(QObject):
         self._settings = s
         s.show()
 
+    def _tray_tip(self):
+        """托盘 tooltip：有热键与无热键两种文案（空热键不出现空洞占位）。"""
+        hk = self.cfg.get("hotkey")
+        return tr("tray_tip", hk) if hk else tr("tray_tip_nokey")
+
     def _settings_applied(self, hotkey_changed):
         self._apply_hotkey()
-        self.tray.setToolTip(tr("tray_tip", self.cfg.get("hotkey")))
+        self.tray.setToolTip(self._tray_tip())
         if hotkey_changed:
+            hk = self.cfg.get("hotkey")
+            # 新热键与"清除热键"分别提示（空热键不出现空洞占位）
             self.toast.pop(
-                tr("hotkey_changed", self.cfg.get("hotkey")),
+                tr("hotkey_changed", hk) if hk else tr("hotkey_cleared"),
                 msec=3000,
             )
         else:
@@ -656,10 +668,12 @@ class SnapApp(QObject):
             self._settings = None
 
     def _apply_hotkey(self):
-        ok = self.hotkey.register(self.cfg.get("hotkey"))
-        if not ok:
-            log.info("热键注册失败: %s", self.cfg.get("hotkey"))
-        if os.name != "nt" and not ok and is_wayland():
+        seq = self.cfg.get("hotkey") or ""
+        ok = self.hotkey.register(seq)
+        if not ok and seq:
+            # 空热键 = 主动不启用（register 内部直接跳过），不算失败
+            log.info("热键注册失败: %s", seq)
+        if not ok and os.name != "nt" and is_wayland():
             log.info(tr("windows_hint_wayland"))
 
     def _on_command(self, args):

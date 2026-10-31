@@ -9,7 +9,7 @@ import threading
 from .paths import config_file
 
 DEFAULTS = {
-    "hotkey": "Ctrl+Alt+A",
+    "hotkey": "",  # 初始不设呼出快捷键：用户在设置里录入并保存后才生效（2026-10-29 需求）
     "autostart": False,
     "save_dir": "",  # 空=系统图片目录
     "lang": "",  # 空=跟随系统
@@ -50,9 +50,9 @@ class Config:
         except Exception:
             # 配置损坏/不可读：回落默认值，不阻断启动
             pass
-        # 旧默认热键迁移（F4 → Ctrl+Alt+A，仅当用户未自定义过）
+        # 旧默认热键迁移（F4 → 无：新语义下默认不启用快捷键，用户未自定义过的旧装机回落为空）
         if self._d.get("hotkey") == "F4":
-            self._d["hotkey"] = "Ctrl+Alt+A"
+            self._d["hotkey"] = ""
 
     def save(self):
         """立即同步落盘（reset/退出等需要马上生效的路径用）。"""

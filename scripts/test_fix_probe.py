@@ -445,6 +445,7 @@ def main():
     import snapocr.platform.autostart as _autostart
 
     _autostart.set_autostart = lambda enabled: True
+    cfg.set("hotkey", "Ctrl+Alt+A")  # 固定初值：探针不依赖环境配置（2026-10-29 新语义下清空=真实变更）
     sd = SettingsDialog(cfg)
     groups = [g.title() for g in sd.findChildren(QGroupBox)]
     check("P26 开机自启独立成组", tr("startup_group") in groups)
@@ -453,7 +454,10 @@ def main():
         sd.autostart_cb.parent() is not None
         and sd.autostart_cb.parent() is not sd.hotkey_edit.parent(),
     )
-    check("UX-9 马赛克块可调", sd.mosaic_spin.minimum() == 6 and sd.mosaic_spin.maximum() == 40)
+    check(
+        "UX-9 马赛克块大小已迁至工具条（设置页无该项）",
+        not hasattr(sd, "mosaic_spin"),
+    )
     check("UX-13 释放模型开关存在", sd.release_cb is not None)
     check("换行 设置页已无「自动合并换行」项", not hasattr(sd, "merge_cb"))
     check("UX-11 恢复默认按钮存在", sd.btn_reset is not None)
@@ -461,8 +465,9 @@ def main():
     sd.settingsApplied.connect(lambda b: emitted.append(b))
     sd.hotkey_edit.clear()  # 清空热键
     sd._apply()
-    check("P9 清空热键回落默认值", cfg.get("hotkey") == DEFAULTS["hotkey"])
-    check("P27 信号带 bool 参数", emitted and emitted[-1] is False)
+    # 2026-10-29 语义：留空 = 不启用快捷键（不再回落默认值）
+    check("P9 清空热键=不启用快捷键", cfg.get("hotkey") == "")
+    check("P27 信号带 bool 参数", emitted and emitted[-1] is True)
     sd2 = SettingsDialog(cfg)
     emitted2 = []
     sd2.settingsApplied.connect(lambda b: emitted2.append(b))
@@ -479,7 +484,7 @@ def main():
     sd3 = SettingsDialog(cfg)
     sd3._restore_defaults()
     check("UX-11 恢复默认写盘生效", cfg.get("mosaic_block") == DEFAULTS["mosaic_block"])
-    check("UX-11 控件同步回默认", sd3.mosaic_spin.value() == DEFAULTS["mosaic_block"])
+    check("UX-11 控件同步回默认", not hasattr(sd3, "mosaic_spin"))
     sd.deleteLater()
     sd2.deleteLater()
     sd3.deleteLater()

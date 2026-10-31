@@ -67,6 +67,8 @@ TEXT_WEIGHTS = [
 
 # 档位：(px, i18n 键)。用户可见文案必须走 tr()（docs/10 §4.3-19），中英在 i18n.py 齐备。
 WIDTHS = [(2, "width_thin"), (5, "width_medium"), (10, "width_thick"), (16, "width_bold")]
+# 马赛克块大小 4 挡（几何递进，2026-10-29 从设置页迁到工具条：马赛克激活时出现）
+MOSAIC_BLOCKS = [(6, "block_small"), (10, "block_medium"), (16, "block_large"), (24, "block_xlarge")]
 TEXT_SIZES = [14, 18, 24, 32]
 
 # 编辑区展开/折叠动画时长（ms）
@@ -108,6 +110,7 @@ class EditorToolbar(QWidget):
     toolChanged = pyqtSignal(str)
     colorChanged = pyqtSignal(str)
     widthChanged = pyqtSignal(int)
+    blockChanged = pyqtSignal(int)  # 马赛克块大小（挡位值，物理像素）
     textSizeChanged = pyqtSignal(int)
     textWeightChanged = pyqtSignal(int)
     fontChanged = pyqtSignal(str)
@@ -304,6 +307,20 @@ class EditorToolbar(QWidget):
         )
         rowB.addWidget(self.width_combo)
 
+        # 马赛克块大小：仅马赛克工具激活时显示，紧跟粗细之后（2026-10-29 从设置页迁入）
+        self.block_combo = EdgeAwareComboBox()
+        for b, key in MOSAIC_BLOCKS:
+            self.block_combo.addItem(tr(key), b)
+        self.block_combo.setCurrentIndex(1)  # 默认「中」(10px)，与画布初始 mosaic_block 一致
+        self.block_combo.setFixedWidth(58)
+        self.block_combo.setFixedHeight(34)
+        self.block_combo.setToolTip(tr("mosaic_block_hint"))
+        self.block_combo.currentIndexChanged.connect(
+            lambda i: self.blockChanged.emit(self.block_combo.itemData(i))
+        )
+        rowB.addWidget(self.block_combo)
+        self.block_combo.hide()
+
         self.size_combo = EdgeAwareComboBox()
         for s in TEXT_SIZES:
             self.size_combo.addItem("%d px" % s, s)
@@ -452,9 +469,11 @@ class EditorToolbar(QWidget):
             b.setChecked(True)
         self.current_tool = kind
         is_text = kind == TOOL_TEXT
+        is_mosaic = kind == TOOL_MOSAIC
         self.size_combo.setVisible(is_text)
         self.weight_combo.setVisible(is_text)
         self.font_combo.setVisible(is_text)
+        self.block_combo.setVisible(is_mosaic)
         self.width_combo.setVisible(not is_text)
         self.adjustSize()
 
@@ -467,6 +486,14 @@ class EditorToolbar(QWidget):
         self.width_combo.blockSignals(True)
         self.width_combo.setCurrentIndex(i)
         self.width_combo.blockSignals(False)
+
+    def set_block(self, b):
+        """马赛克块大小回填（会话开始从 cfg 恢复；不在挡位则就近取中挡）。"""
+        vals = [x for x, _ in MOSAIC_BLOCKS]
+        i = vals.index(b) if b in vals else 1
+        self.block_combo.blockSignals(True)
+        self.block_combo.setCurrentIndex(i)
+        self.block_combo.blockSignals(False)
 
 
 def _poly(pts):

@@ -138,6 +138,7 @@ class OverlayWindow(QWidget):
         self.toolbar.textSizeChanged.connect(self._on_text_size)
         self.toolbar.textWeightChanged.connect(self._on_text_weight)
         self.toolbar.fontChanged.connect(self._on_font)
+        self.toolbar.blockChanged.connect(self._on_block)
         self.toolbar.undoClicked.connect(lambda: self.canvas and self.canvas.undo())
         self.toolbar.redoClicked.connect(lambda: self.canvas and self.canvas.redo())
         self.toolbar.clearClicked.connect(lambda: self.canvas and self.canvas.clear_all())
@@ -244,7 +245,11 @@ class OverlayWindow(QWidget):
         # 重新框选后新画布沿用工具条当前的颜色/粗细/字号/字重/字体：工具条是会话内的
         # 状态持有者（画布随 teardown 销毁重建，曾回默认红/中档，与色片显示不一致）
         self.canvas.color = self.toolbar.btn_color._hex
+        self.toolbar.set_block(int(self.cfg.get("mosaic_block", 10)))  # 回填 cfg 挡位
         self.canvas.line_width = self.toolbar.width_combo.currentData() or 5
+        self.canvas.mosaic_block = self.toolbar.block_combo.currentData() or int(
+            self.cfg.get("mosaic_block", 10)
+        )
         self.canvas.text_size = self.toolbar.size_combo.currentData() or 18
         self.canvas.text_weight = self.toolbar.weight_combo.currentData() or QFont.Normal
         self.canvas.text_font = self.toolbar.font_combo.currentFont().family()
@@ -295,6 +300,11 @@ class OverlayWindow(QWidget):
 
     def _on_font(self, family):
         self.canvas.text_font = family
+
+    def _on_block(self, b):
+        """马赛克块大小挡位：即时生效于后续笔画 + 跨会话记忆（走防抖写盘）。"""
+        self.canvas.mosaic_block = max(6, int(b))
+        self.cfg.set("mosaic_block", int(b))
 
     # ---------- 工具条定位 ----------
     def _reposition_toolbar(self, h_override=None):
@@ -927,8 +937,11 @@ class OverlayWindow(QWidget):
         elif ev.key() == Qt.Key_F1:
             from PyQt5.QtWidgets import QMessageBox
 
+            hk = self.cfg.get("hotkey")
             QMessageBox.information(
-                self, tr("shortcuts"), tr("shortcuts_text", self.cfg.get("hotkey"))
+                self,
+                tr("shortcuts"),
+                tr("shortcuts_text", hk) if hk else tr("shortcuts_text_none"),
             )
         else:
             super().keyPressEvent(ev)
