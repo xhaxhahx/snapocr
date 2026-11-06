@@ -68,7 +68,12 @@ TEXT_WEIGHTS = [
 # 档位：(px, i18n 键)。用户可见文案必须走 tr()（docs/10 §4.3-19），中英在 i18n.py 齐备。
 WIDTHS = [(2, "width_thin"), (5, "width_medium"), (10, "width_thick"), (16, "width_bold")]
 # 马赛克块大小 4 挡（几何递进，2026-10-29 从设置页迁到工具条：马赛克激活时出现）
-MOSAIC_BLOCKS = [(6, "block_small"), (10, "block_medium"), (16, "block_large"), (24, "block_xlarge")]
+MOSAIC_BLOCKS = [
+    (6, "block_small"),
+    (10, "block_medium"),
+    (16, "block_large"),
+    (24, "block_xlarge"),
+]
 TEXT_SIZES = [14, 18, 24, 32]
 
 # 编辑区展开/折叠动画时长（ms）

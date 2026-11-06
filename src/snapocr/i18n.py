@@ -245,9 +245,13 @@ _EN = {
     "apply": "Apply",
     "close": "Close",
     "tray_tip": "Screenshot Tool - click to capture, {} for hotkey",
-    "tray_tip_nokey": "Screenshot Tool - click the icon to capture (configure a hotkey in Settings)",
+    "tray_tip_nokey": (
+        "Screenshot Tool - click the icon to capture " "(configure a hotkey in Settings)"
+    ),
     "first_run_tip": "Click the tray icon or press {} to capture, then OCR",
-    "first_run_tip_nokey": "Click the tray icon to capture, then OCR; configure a hotkey in Settings",
+    "first_run_tip_nokey": (
+        "Click the tray icon to capture, then OCR; " "configure a hotkey in Settings"
+    ),
     "hotkey_cleared": "Capture hotkey cleared",
     "shortcuts_text_none": "Capture: not set (configure a hotkey in Settings)\n",
     "text_input_hint": "Type text; Ctrl+Enter or click empty area to finish",

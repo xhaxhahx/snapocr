@@ -445,7 +445,9 @@ def main():
     import snapocr.platform.autostart as _autostart
 
     _autostart.set_autostart = lambda enabled: True
-    cfg.set("hotkey", "Ctrl+Alt+A")  # 固定初值：探针不依赖环境配置（2026-10-29 新语义下清空=真实变更）
+    cfg.set(
+        "hotkey", "Ctrl+Alt+A"
+    )  # 固定初值：探针不依赖环境配置（2026-10-29 新语义下清空=真实变更）
     sd = SettingsDialog(cfg)
     groups = [g.title() for g in sd.findChildren(QGroupBox)]
     check("P26 开机自启独立成组", tr("startup_group") in groups)

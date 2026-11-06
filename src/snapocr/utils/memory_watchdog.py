@@ -10,9 +10,9 @@
 busy 时整个周期跳过——绝不打断正在进行的截屏/识别/任何可见窗口。
 """
 
-import gc
 import os
 import time
+from typing import ClassVar
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
@@ -29,11 +29,10 @@ BASELINE_SAMPLES_S = (10, 25, 45)  # 基线多点采样（取最低；10s 时初
 def _commit_mb_win() -> float:
     """Windows：Commit（PagefileUsage，含私有提交页，比 WS 稳定）。"""
     import ctypes
-
     from ctypes import wintypes
 
     class PMC(ctypes.Structure):
-        _fields_ = [
+        _fields_: ClassVar = [
             ("cb", wintypes.DWORD),
             ("PageFaultCount", wintypes.DWORD),
             ("PeakWorkingSetSize", ctypes.c_size_t),
@@ -126,9 +125,7 @@ class MemoryWatchdog(QObject):
         """基线 min-tracking，带骤降守卫：读数较基线腰斩 = 进程退出伪影
         （旧实例关闭途中定时器最后一跳，Commit 已被系统回收），不得采信。"""
         if self._baseline is not None and cur < self._baseline * 0.5:
-            log.warning(
-                "内存读数骤降 %.1f→%.1fMB，视为退出伪影忽略", self._baseline, cur
-            )
+            log.warning("内存读数骤降 %.1f→%.1fMB，视为退出伪影忽略", self._baseline, cur)
             return
         self._baseline = min(self._baseline, cur) if self._baseline else cur
         log.info("内存看门狗基线: %.1fMB", self._baseline)
@@ -161,8 +158,12 @@ class MemoryWatchdog(QObject):
         # ---- threshold 模式（默认）----
         limit = self._baseline + max(10, int(self._cfg_get("mem_threshold_mb", 30)))
         if cur > limit:
-            log.info("内存超阈值: %.1fMB (基线 %.1f + %d)", cur, self._baseline,
-                     max(10, int(self._cfg_get("mem_threshold_mb", 30))))
+            log.info(
+                "内存超阈值: %.1fMB (基线 %.1f + %d)",
+                cur,
+                self._baseline,
+                max(10, int(self._cfg_get("mem_threshold_mb", 30))),
+            )
             self._soft_release()
             cur = commit_mb()
             self.softReleased.emit(cur)

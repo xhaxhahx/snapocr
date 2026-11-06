@@ -20,7 +20,6 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from ..config import DEFAULTS
 from ..i18n import tr
 from . import theme
 from .editor import EdgeAwareComboBox
