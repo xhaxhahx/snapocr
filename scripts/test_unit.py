@@ -266,6 +266,22 @@ def test_x11_key_event_matches_xevent_size():
     check("XKeyEvent 补足到 XEvent 大小", ctypes.sizeof(XKeyEvent) == 192, ctypes.sizeof(XKeyEvent))
 
 
+def test_x11_display_fd_offset_stable():
+    """_XDisplay 头部 fd 字段偏移必须为 16（LP64，XlibInt.h 布局）。
+
+    Xlib 未导出 ConnectionNumber（C 宏），热键线程按结构布局直读 fd 供
+    select 轮询（P2-07 修复的退出机制依赖此偏移）。X11R6 起该布局未变，
+    此测试防未来 Xlib 变更时静默错位。
+    """
+    if os.name == "nt":
+        return
+    import ctypes
+
+    from snapocr.platform.hotkey_linux import _XDisplayHead
+
+    check("_XDisplayHead.fd 偏移", _XDisplayHead.fd.offset == 16, _XDisplayHead.fd.offset)
+
+
 def test_sel_dirty_covers_both_rects():
     """局部重绘区域必须同时覆盖旧、新选区，且上方留出尺寸标签余量。"""
     _qapp()

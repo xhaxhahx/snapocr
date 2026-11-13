@@ -100,7 +100,7 @@ class HotkeyManager(QObject):
         if not ctypes.windll.user32.RegisterHotKey(None, HOTKEY_ID, m | MOD_NOREPEAT, vk):
             # 改键失败回滚：register 首行已注销旧热键，不回滚则本会话热键彻底失效
             # （实测失败后旧组合可被外部进程立刻抢注，§33.1 A5）。
-            # Linux 侧因 P2-07（X11 线程阻塞在 XNextEvent）无法等价回滚，维持既有语义。
+            # Linux 侧已对齐同款回滚（X11 线程 select 轮询可及时退出，P2-07 已修）。
             prev = self._current
             if prev:
                 self._current = ""  # 置空防递归回滚
