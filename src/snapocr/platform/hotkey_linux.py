@@ -2,6 +2,7 @@
 """Linux 全局热键（X11：XGrabKey；Wayland 上自动跳过，改用 DE 自定义快捷键）。"""
 
 import contextlib
+import ctypes
 import os
 import threading
 from typing import ClassVar
@@ -17,6 +18,37 @@ _MODNAME = {"ctrl": 4, "control": 4, "alt": 8, "shift": 1, "meta": 64, "win": 64
 _MOD2 = 0x10  # NumLock
 _LOCK = 0x02  # CapsLock
 _KEYPRESS = 2
+
+
+class XKeyEvent(ctypes.Structure):
+    """X11 按键事件（XEvent 联合体布局）。
+
+    XNextEvent 按**完整 XEvent 联合体**整块写入，64 位下为 192 字节；本结构体
+    主体仅 ~96 字节，必须补足 pad —— 否则每收到一次按键事件就越界写堆
+    96 字节，堆元数据被破坏后进程在下一次 Python 分配时段错误
+    （2026-11-13 用户实测：设置热键后按热键必闪退，两份 coredump 栈均落在
+    热键槽内的普通分配处）。补足写法与 x11.py 的 _XClientMessageEvent 一致。
+    """
+
+    _fields_: ClassVar = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("window", ctypes.c_ulong),
+        ("root", ctypes.c_ulong),
+        ("subwindow", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("x", ctypes.c_int),
+        ("y", ctypes.c_int),
+        ("x_root", ctypes.c_int),
+        ("y_root", ctypes.c_int),
+        ("state", ctypes.c_uint),
+        ("keycode", ctypes.c_ubyte),
+        ("same_screen", ctypes.c_int),
+        # 补足到 XEvent 联合体大小（64 位 192 字节）：XNextEvent 整块写入
+        ("pad", ctypes.c_long * 12),
+    ]
 
 
 class HotkeyManager(QObject):
@@ -56,8 +88,6 @@ class HotkeyManager(QObject):
 
     # ---- 内部 ----
     def _x11_loop(self, seq_text):
-        import ctypes
-
         X11Error = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_char))
 
         try:
@@ -133,29 +163,10 @@ class HotkeyManager(QObject):
         x11.XSelectInput(dpy, root, 0x2)  # KeyPressMask
         x11.XSync(dpy, False)
 
-        class XKeyEvent(ctypes.Structure):
-            _fields_: ClassVar = [
-                ("type", ctypes.c_int),
-                ("serial", ctypes.c_ulong),
-                ("send_event", ctypes.c_int),
-                ("display", ctypes.c_void_p),
-                ("window", ctypes.c_ulong),
-                ("root", ctypes.c_ulong),
-                ("subwindow", ctypes.c_ulong),
-                ("time", ctypes.c_ulong),
-                ("x", ctypes.c_int),
-                ("y", ctypes.c_int),
-                ("x_root", ctypes.c_int),
-                ("y_root", ctypes.c_int),
-                ("state", ctypes.c_uint),
-                ("keycode", ctypes.c_ubyte),
-                ("same_screen", ctypes.c_int),
-            ]
-
         from PyQt5.QtCore import QMetaObject
         from PyQt5.QtCore import Qt as QtEnum
 
-        ev = XKeyEvent()
+        ev = XKeyEvent()  # 模块级定义：已补足到 XEvent 联合体完整大小
         p_ev = ctypes.byref(ev)
         while not self._stop.is_set():
             x11.XNextEvent(dpy, p_ev)

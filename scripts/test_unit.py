@@ -249,6 +249,23 @@ def test_color_picker_reexport_identity():
     )
 
 
+def test_x11_key_event_matches_xevent_size():
+    """X11 事件缓冲必须补足到 XEvent 联合体完整大小（64 位 192 字节）。
+
+    XNextEvent 按联合体整块写入：结构体小了会每次按键越界写堆 96 字节，
+    破坏堆元数据后在后续任意分配处段错误（2026-11-13 热键闪退根因，
+    双 coredump 实证）。仅 Linux 走此路径，Windows 下 c_long 为 4 字节、
+    语义不同，跳过断言。
+    """
+    if os.name == "nt":
+        return
+    import ctypes
+
+    from snapocr.platform.hotkey_linux import XKeyEvent
+
+    check("XKeyEvent 补足到 XEvent 大小", ctypes.sizeof(XKeyEvent) == 192, ctypes.sizeof(XKeyEvent))
+
+
 def test_sel_dirty_covers_both_rects():
     """局部重绘区域必须同时覆盖旧、新选区，且上方留出尺寸标签余量。"""
     _qapp()
