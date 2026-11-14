@@ -23,6 +23,10 @@ class OcrWorker(QThread):
         super().__init__(parent)
         self.cfg = cfg
         self.qimage = qimage
+        self._cancelled = False  # U3 换任务时置位：流水线在阶段边界尽早退出
+
+    def cancel(self):
+        self._cancelled = True
 
     def run(self):
         try:
@@ -36,6 +40,7 @@ class OcrWorker(QThread):
                 bgr,
                 on_found=self.found.emit,
                 on_line=lambda item, done, total: self.partial.emit(item[0], done, total),
+                should_stop=lambda: self._cancelled,
             )
             self.ok.emit(results, elapsed)
         except E.OcrError as e:

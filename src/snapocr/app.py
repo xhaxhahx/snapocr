@@ -69,6 +69,12 @@ class ToastLabel(QLabel):
         self._timer.timeout.connect(self._advance)
 
     def pop(self, text, screen=None, msec=1600):
+        # 防风暴：相同文本正在显示或已在队尾时不再入队——识别中连点按钮时
+        # 此前每点一次排队一条（1.6s/条），连点 10 次要回放十几秒
+        if (self.isVisible() and self.text() == text) or (
+            self._queue and self._queue[-1][0] == text
+        ):
+            return
         self._queue.append((text, screen, msec))
         if not self.isVisible() and not self._timer.isActive():
             self._show_next()
@@ -337,13 +343,51 @@ class CaptureController(QObject):
     _last_input = None
 
     def toggle_ocr(self, img, anchor_rect=None, screen=None):
-        """点「OCR识别」= 打开或关闭识别窗口（简单切换）。"""
+        """点「OCR识别」= 打开或关闭识别窗口（开关语义）。
+
+        - 可见 → 隐藏（识别任务照跑；隐藏后可再点恢复显示）
+        - 已存在但隐藏 → 恢复显示，不盲目重跑：
+            · 识别中：显示流式进度（此前 toast 挡道，窗口点不开）
+            · 空闲且画面未变：显示上次结果（此前清掉重跑，同一张图白烧一轮）
+            · 空闲但画面已变（用户新画了标注等）：按新合成图重新识别（U1 所见即所得）
+        - 不存在 → 首次识别；显式重跑走结果窗「重新识别」按钮（_rerun）
+        """
         screen = screen or QApplication.primaryScreen()
         if self.result is not None and self.result.isVisible():
             self.result.hide()
             self.ocrPanel.emit(False)
             return
+        if self.result is not None:
+            if self.worker is None and not self._same_image(img, self._last_input):
+                self.run_ocr(img, anchor_rect, screen)  # 画面变了：按新合成图识别
+                return
+            self.result.show()
+            self.result.raise_()
+            self.result.activateWindow()
+            self.ocrPanel.emit(True)
+            return
         self.run_ocr(img, anchor_rect, screen)
+
+    @staticmethod
+    def _same_image(a, b):
+        """两张 QImage 像素是否一致（逐字节比对；4K 一次约 10-20ms，可接受）。"""
+        if a is None or b is None or a.size() != b.size():
+            return False
+        try:
+            n = a.sizeInBytes()
+            if n != b.sizeInBytes():
+                return False
+
+            def raw(im):
+                ptr = im.constBits()
+                try:
+                    return bytes(ptr.asarray(n))
+                except AttributeError:
+                    return bytes(ptr)
+
+            return raw(a) == raw(b)
+        except Exception:
+            return False  # 比较失败按"已变化"处理 → 走重新识别
 
     def run_ocr(self, img, anchor_rect=None, screen=None):
         screen = screen or QApplication.primaryScreen()
@@ -399,7 +443,11 @@ class CaptureController(QObject):
             self.result.stream_line(text, done, total)
 
     def _detach_worker(self, w):
-        """丢弃在途识别任务：断开其全部 UI 信号（finished→deleteLater 保留，线程自然收尾）。"""
+        """丢弃在途识别任务：请其在流水线阶段边界尽早退出（原生推理调用本身
+        不打断），并断开其全部 UI 信号（线程自然收尾回收）。"""
+        cancel = getattr(w, "cancel", None)
+        if cancel:
+            cancel()  # 旧任务与新任务并发会翻倍内存峰值（4K det 数百 MB），尽早退
         with contextlib.suppress(TypeError, RuntimeError):
             w.ok.disconnect(self._ocr_ok)
             w.fail.disconnect(self._ocr_fail)

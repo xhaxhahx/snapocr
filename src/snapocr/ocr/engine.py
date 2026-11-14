@@ -229,7 +229,7 @@ def _reading_order_indices(boxes, count):
     return sorted(range(count), key=key)
 
 
-def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None):
+def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None, should_stop=None):
     """流式识别：det → cls → 逐框 rec，边识别边回调，用于"让用户看到模型在工作"。
 
     参数
@@ -237,6 +237,9 @@ def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None):
     on_found(total): 检测完成时回调，total 为文本框数量（此阶段之前无任何文字可显示）
     on_line(item, done, total): 每识别完一条回调；item=(text, score, box)，
         只回调**通过置信度阈值**的结果，避免界面出现随后又消失的噪声
+    should_stop(): 可选取消探针，在流水线阶段边界轮询（det/cls 之后、每框 rec
+        之间）。命中即尽早返回（结果不完整，仅供已断开信号的弃任务自然收尾）。
+        原生推理调用（det/cls/单框 rec）本身不打断。
 
     返回 (results, elapsed)，其中 results 与 `recognize_sync` 完全一致
     （同阈值过滤、同阅读顺序、同坐标映射）。
@@ -244,6 +247,10 @@ def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None):
     说明：det 占整条流水线约 70%~80% 的时间且无法输出文字，故 `on_found` 是
     "有进展"的最早信号；逐框 rec 与整批 rec 耗时基本相同（实测约 0.8~1.0 倍）。
     """
+
+    def _stopped():
+        return bool(should_stop and should_stop())
+
     eng = get_engine(cfg)
     t0 = time.perf_counter()
     # 与 recognize_sync 保持完全相同的预处理，保证结果一致
@@ -259,8 +266,12 @@ def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None):
     op_record = {}
     try:
         crops, det_res = eng.detect_and_crop(bgr, op_record)
+        if _stopped():
+            return [], time.perf_counter() - t0
         if getattr(eng, "use_cls", False):
             crops, _cls_res = eng.cls_and_rotate(crops)
+            if _stopped():
+                return [], time.perf_counter() - t0
     except Exception as e:
         if "result is empty" in str(e):
             # 空白/零检出图：上游 detect_and_crop 抛异常，而 __call__（sync 路径）对同一
@@ -286,6 +297,8 @@ def recognize_stream(cfg, bgr: np.ndarray, on_found=None, on_line=None):
     order = _reading_order_indices(boxes, total)
     items = []
     for done, idx in enumerate(order, 1):
+        if _stopped():
+            break  # 弃任务：已识别的部分随断开的信号自然丢弃
         text, score = "", 0.0
         try:
             out = eng.recognize_txt([crops[idx]])
