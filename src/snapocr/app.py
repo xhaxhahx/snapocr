@@ -175,6 +175,7 @@ class CaptureController(QObject):
             ov.cancelled.connect(self._on_finished)
             ov.previewClosed.connect(self._maybe_quit_once)
             ov.editClicked.connect(self._on_edit_clicked)
+            ov.toolClicked.connect(self._on_edit_clicked)  # 工具按钮=编辑模式优先，同语义
             ov.raisePinnedRequested.connect(self._raise_pinned_previews)
             overlays.append(ov)
         if not overlays:

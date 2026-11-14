@@ -69,6 +69,10 @@ class OverlayWindow(QWidget):
     # （编辑模式优先，2026-11-14 用户需求）。只在按钮点击时发——_on_edit_toggle
     # 还有程序化展开的内部调用（选区建立时默认展开），那里发会误关结果窗。
     editClicked = pyqtSignal(bool)
+    # 用户点了任一工具按钮（画笔/高亮/文字/形状/马赛克/橡皮/选择，kind=工具名）：
+    # 与「编辑」同语义——关闭 OCR 结果窗与未钉住预览（2026-11-15 用户需求）。
+    # 只在按钮点击时发：程序化 set_tool 不经过 toolChanged，建会话不会误触发。
+    toolClicked = pyqtSignal(str)
 
     def __init__(self, screen, pm, cfg, ocr_busy_signal=None):
         super().__init__(
@@ -138,6 +142,7 @@ class OverlayWindow(QWidget):
         self.toolbar.editToggled.connect(self._on_edit_toggle)
         self.toolbar.editToggled.connect(self.editClicked.emit)  # 按钮点击直传宿主
         self.toolbar.toolChanged.connect(self._on_tool)
+        self.toolbar.toolChanged.connect(self.toolClicked.emit)  # 工具按钮点击直传宿主
         self.toolbar.colorChanged.connect(self._on_color)
         self.toolbar.widthChanged.connect(self._on_width)
         self.toolbar.textSizeChanged.connect(self._on_text_size)
