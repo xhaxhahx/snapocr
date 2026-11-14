@@ -65,6 +65,10 @@ class OverlayWindow(QWidget):
     previewClosed = pyqtSignal()  # 钉住的预览窗被关闭（宿主需重新判定进程去留）
     # 遮罩被激活（点击/热键呼出到顶，可能盖住钉住的预览窗）→ 宿主重提钉住窗
     raisePinnedRequested = pyqtSignal()
+    # 用户点了「编辑」按钮（expanded=点击后的展开态）：宿主据此关闭 OCR 结果窗
+    # （编辑模式优先，2026-11-14 用户需求）。只在按钮点击时发——_on_edit_toggle
+    # 还有程序化展开的内部调用（选区建立时默认展开），那里发会误关结果窗。
+    editClicked = pyqtSignal(bool)
 
     def __init__(self, screen, pm, cfg, ocr_busy_signal=None):
         super().__init__(
@@ -132,6 +136,7 @@ class OverlayWindow(QWidget):
         self.toolbar = EditorToolbar(self)
         self.toolbar.hide()
         self.toolbar.editToggled.connect(self._on_edit_toggle)
+        self.toolbar.editToggled.connect(self.editClicked.emit)  # 按钮点击直传宿主
         self.toolbar.toolChanged.connect(self._on_tool)
         self.toolbar.colorChanged.connect(self._on_color)
         self.toolbar.widthChanged.connect(self._on_width)

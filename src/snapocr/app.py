@@ -156,6 +156,7 @@ class CaptureController(QObject):
             ov.finished.connect(self._on_finished)
             ov.cancelled.connect(self._on_finished)
             ov.previewClosed.connect(self._maybe_quit_once)
+            ov.editClicked.connect(self._on_edit_clicked)
             ov.raisePinnedRequested.connect(self._raise_pinned_previews)
             overlays.append(ov)
         if not overlays:
@@ -485,6 +486,21 @@ class CaptureController(QObject):
         if self._last_input is not None:
             screen = QApplication.primaryScreen()
             self.run_ocr(self._last_input, None, screen)
+
+    def _on_edit_clicked(self, *_):
+        """点「编辑」= 编辑模式优先：彻底关闭 OCR 结果窗（2026-11-14 用户需求）。
+
+        与 toggle_ocr 的"隐藏可恢复"不同，这里是终局关闭：close() → closed →
+        _result_closed → result=None + 释放 _last_input + ocrPanel(False)
+        （OCR 按钮回默认色）。在途识别一并取消——结果已无处呈现，省 CPU/内存
+        （_detach_worker 含 cancel() 与信号断开）；此后点「OCR识别」即全新识别。
+        """
+        if self.result is None:
+            return
+        if self.worker is not None:
+            self._detach_worker(self.worker)
+            self.worker = None
+        self.result.close()
 
     def _on_selection_moved(self):
         """移动选区 = 重新取景，结果窗直接关闭（按钮状态同步）。"""
