@@ -112,6 +112,24 @@ class CaptureController(QObject):
         self._stale_ocr = False  # 选区已移动：在途识别结果作废（U3）
         self._hiding = []
         self._previews = []  # 存活的预览窗强引用（见 _close_overlays）
+        # 钉住预览窗可见性的第二触发点：遮罩（含全部子控件）上的鼠标按下
+        # 同步重提。与 ActivationChange 双保险，零定时器零闪烁（2026-11-14）。
+        # 注意必须装在 QApplication 实例上（全局过滤）：装在普通 QObject 上
+        # 只能看到发往该对象自身的事件，遮罩的鼠标事件永远到不了过滤器。
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, ev):
+        """遮罩上任何位置（裸区/工具条/画布）发生鼠标按下 → 立即重提钉住预览窗。
+
+        kwin 的"点击抬升"会把全屏遮罩提到钉住预览窗之上；ActivationChange
+        回调与 WM 抬升存在竞态（实测偶发输）。鼠标按下是 WM 抬升的直接
+        原因事件，Qt 收到该事件即同步 raise，与激活回调构成双触发点。
+        只按 window() 归属判断，结果窗/预览窗/Toast 自身的点击不触发。
+        """
+        if ev.type() == QEvent.MouseButtonPress and self.overlays and obj.isWidgetType():
+            if obj.window() in self.overlays:
+                self._raise_pinned_previews()
+        return False
 
     # ---------- 截屏 ----------
     def start_capture(self):
@@ -488,19 +506,26 @@ class CaptureController(QObject):
             self.run_ocr(self._last_input, None, screen)
 
     def _on_edit_clicked(self, *_):
-        """点「编辑」= 编辑模式优先：彻底关闭 OCR 结果窗（2026-11-14 用户需求）。
+        """点「编辑」= 编辑模式优先（2026-11-14 用户需求）。
 
-        与 toggle_ocr 的"隐藏可恢复"不同，这里是终局关闭：close() → closed →
-        _result_closed → result=None + 释放 _last_input + ocrPanel(False)
-        （OCR 按钮回默认色）。在途识别一并取消——结果已无处呈现，省 CPU/内存
-        （_detach_worker 含 cancel() 与信号断开）；此后点「OCR识别」即全新识别。
+        两件事相互独立，都按现状幂等处理：
+        - OCR 结果窗终局关闭（与 toggle_ocr 的"隐藏可恢复"不同）：close() →
+          closed → _result_closed → result=None + 释放 _last_input +
+          ocrPanel(False)（OCR 按钮回默认色）。在途识别一并取消——结果已无处
+          呈现，省 CPU/内存（_detach_worker 含 cancel() 与信号断开）；
+          此后点「OCR识别」即全新识别。
+        - 未钉住的预览确认窗一并关闭：预览持有打开瞬间的快照，编辑落笔后
+          从预览复制/另存会丢失新标注（含马赛克隐私反直觉），关闭即消除；
+          钉住的预览窗保留（跨会话语义，且由重提机制保证可见）。
         """
-        if self.result is None:
-            return
-        if self.worker is not None:
-            self._detach_worker(self.worker)
-            self.worker = None
-        self.result.close()
+        if self.result is not None:
+            if self.worker is not None:
+                self._detach_worker(self.worker)
+                self.worker = None
+            self.result.close()
+        for w in QApplication.topLevelWidgets():
+            if isinstance(w, PreviewDialog) and not getattr(w, "pinned", False) and w.isVisible():
+                w.close()
 
     def _on_selection_moved(self):
         """移动选区 = 重新取景，结果窗直接关闭（按钮状态同步）。"""
