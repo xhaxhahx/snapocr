@@ -42,6 +42,48 @@ a = Analysis(
     ],
 )
 
+# GLIBCXX 兜底：PyInstaller 的依赖搜索可能抓到**系统** libstdc++（UOS 上最高
+# 仅 GLIBCXX_3.4.25），而构建环境（conda/新版 GCC）的 libQt5Core 需要
+# GLIBCXX_3.4.26+，启动即 ImportError: version `GLIBCXX_3.4.26' not found
+# （2026-11-14 构建实测，旧包未触发是因为当时抓到的是环境内的库）。
+# 守卫：拟打包的 libstdc++ 若缺 3.4.26，就从其它已打包二进制的来源目录与
+# 构建环境 lib/ 中找符号更新的 libstdc++ 覆盖；找不到则告警（由启动冒烟暴露）。
+import re as _re
+import sys as _sys
+
+
+def _max_glibcxx(path):
+    try:
+        with open(path, "rb") as f:
+            vers = _re.findall(rb"GLIBCXX_3\.4\.(\d+)", f.read())
+        return max(int(v) for v in vers) if vers else -1
+    except Exception:
+        return -1
+
+
+_GLIBCXX_NEED = 26  # libQt5Core（conda, GCC9+ 编译）要求的最低 GLIBCXX 版本
+_stdc = [b for b in a.binaries if os.path.basename(b[0]) == "libstdc++.so.6"]
+if _stdc and _max_glibcxx(_stdc[0][1]) < _GLIBCXX_NEED:
+    _cands = {}
+    for _, src, _k in a.binaries:
+        _p = os.path.join(os.path.dirname(os.path.abspath(src)), "libstdc++.so.6")
+        if os.path.isfile(_p):
+            _cands[_p] = _max_glibcxx(_p)
+    _env = os.path.join(_sys.prefix, "lib", "libstdc++.so.6")
+    if os.path.isfile(_env):
+        _cands[_env] = _max_glibcxx(_env)
+    _best = max(_cands.items(), key=lambda kv: kv[1]) if _cands else (None, -1)
+    if _best[0] and _best[1] >= _GLIBCXX_NEED:
+        print("spec: 替换 libstdc++ %s(GLIBCXX_3.4.%d) -> %s(GLIBCXX_3.4.%d)"
+              % (_stdc[0][1], _max_glibcxx(_stdc[0][1]), _best[0], _best[1]))
+        a.binaries = [
+            (b[0], _best[0] if os.path.basename(b[0]) == "libstdc++.so.6" else b[1], b[2])
+            for b in a.binaries
+        ]
+    else:
+        print("spec: [WARN] 未找到 GLIBCXX_3.4.%d+ 的 libstdc++，Qt5Core 可能启动失败"
+              % _GLIBCXX_NEED)
+
 # 瘦身-D：只保留用到的 Qt 插件目录（platforms/styles/imageformats:qico,qpng,qjpeg），剔除 translations 等死目录
 _KEEP_PLUGIN_DIRS = ("platforms/", "styles/", "imageformats/")
 _KEEP_IMAGE_FORMATS = ("qico", "qpng", "qjpeg")
