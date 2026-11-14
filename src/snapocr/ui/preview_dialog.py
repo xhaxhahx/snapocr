@@ -161,12 +161,19 @@ class PreviewDialog(QWidget):
     cancelled = pyqtSignal()  # 取消：仅关闭预览
     closed = pyqtSignal()  # 窗口已关闭（钉住态关闭后宿主需重新判定进程去留）
 
-    def __init__(self, image: QImage, cfg, parent=None):
+    def __init__(self, image: QImage, cfg, parent=None, embedded=False):
         # 自绘标题栏（Frameless）：图钉必须落在**最小化按钮左边**，而系统原生标题栏
         # 无法插入自定义按钮（2026-10-28 用户要求）。三个系统按钮自己画、自己实现，
         # 配色沿用结果窗的 token（t.bg/t.text/t.hover），明暗主题一致。
         # 置顶只在未钉住时生效：钉住 ≠ 总在最前，见 _on_pin_toggled。
-        super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        # embedded=True（A 方案）：作为遮罩的子控件面板存在——不带任何窗口标志，
+        # 父子关系保证其恒前置于遮罩内容，kwin 的点击抬升无法影响（独立顶层窗
+        # 会被点击激活的全屏遮罩盖住，2026-11-14 实测）。无 parent 时忽略该参数。
+        self._embedded = bool(embedded) and parent is not None
+        if self._embedded:
+            super().__init__(parent)
+        else:
+            super().__init__(parent, Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         # 预览窗全是按钮（复制/另存/重试/取消），无输入法需求：禁关联避免任务栏
         # 语言栏闪现导致托盘图标位移（与遮罩同一处理，详见 overlay.py 同处注释）
         self.setAttribute(Qt.WA_InputMethodEnabled, False)
@@ -175,6 +182,7 @@ class PreviewDialog(QWidget):
         self._busy = False
         # 钉住：会话结束后窗口仍保留（2026-10-27 需求）。不钉住时随任务结束关闭。
         self.pinned = False
+        self._maxed = False  # 子面板形态的"最大化"是手动几何切换（不可 showMaximized）
         self._session_ended = False  # 会话已结束（遮罩销毁）：重试不可用
         self._drag_pos = None  # 标题栏拖动窗口的起点（全局坐标）
         self.setWindowTitle(tr("preview_title"))
@@ -311,6 +319,35 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
         self.btn_retry.setEnabled(False)
         self.btn_retry.setToolTip(tr("retry_unavailable"))
 
+    def set_embedded(self, embedded, host=None):
+        """在"遮罩子面板"与"独立顶层窗"两种形态间原子迁移（A 方案核心）。
+
+        迁移保持全局位置与尺寸不变（先 mapToGlobal 记录，次屏才不丢偏移）；
+        setWindowFlags 会重建原生窗口并隐藏控件，最后按迁移前可见性恢复。
+        面板形态的可见性由父子关系确定性保证；顶层形态（跨会话的钉住窗）
+        沿用遮罩激活重提兜底。embedded=True 但拿不到宿主时优雅降级为保持顶层。
+        """
+        if embedded == self._embedded:
+            return
+        gpos = self.mapToGlobal(self.geometry().topLeft())
+        size = self.size()
+        vis = self.isVisible()
+        if embedded and host is not None:
+            local = host.mapFromGlobal(gpos)
+            self.setParent(host)
+            self.setWindowFlags(Qt.Widget)
+            self._embedded = True
+            self.setGeometry(local.x(), local.y(), size.width(), size.height())
+        elif not embedded:
+            self.setParent(None)
+            self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+            self._embedded = False
+            self.setGeometry(gpos.x(), gpos.y(), size.width(), size.height())
+        else:
+            return
+        self._maxed = False
+        self.setVisible(vis)
+
     def _on_pin_toggled(self, pinned):
         """钉住 = 置顶并跨会话保留（2026-10-29 用户修订：钉住后前置于截图遮罩）。
 
@@ -357,8 +394,22 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
                 self.showMinimized()
 
     def _toggle_max(self):
-        """最大化/还原切换（自绘标题栏自带，原生标题栏才由系统处理）。"""
-        if self.isMaximized():
+        """最大化/还原切换（自绘标题栏自带，原生标题栏才由系统处理）。
+
+        子面板形态没有 isMaximized/ShowWindow 可用：在遮罩范围内手动切换，
+        记忆并还原原几何（语义与顶层窗一致）。
+        """
+        if self._embedded:
+            if self._maxed:
+                self.setGeometry(self._normal_geo)
+                self._maxed = False
+            else:
+                self._normal_geo = self.geometry()
+                pw = self.parentWidget()
+                if pw is not None:
+                    self.setGeometry(0, 0, pw.width(), pw.height())
+                self._maxed = True
+        elif self.isMaximized():
             self.showNormal()
         else:
             self.showMaximized()
@@ -371,6 +422,18 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
             self._update_title_icons()
 
     # ---------- 自绘标题栏：拖动与双击最大化 ----------
+    def _move_to_global(self, gpos):
+        """按当前形态把"全局坐标的目标左上角"落到 move()。
+
+        顶层窗 move() 即全局坐标；子面板 move() 是父坐标——必须经
+        parentWidget().mapFromGlobal 换算，否则次屏（遮罩原点非 (0,0)）拖动
+        和定位会整体偏移一个屏幕原点。
+        """
+        if self.parentWidget() is not None:
+            self.move(self.parentWidget().mapFromGlobal(gpos))
+        else:
+            self.move(gpos)
+
     def mousePressEvent(self, ev):
         if (
             ev.button() == Qt.LeftButton
@@ -383,7 +446,7 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
 
     def mouseMoveEvent(self, ev):
         if self._drag_pos is not None and ev.buttons() & Qt.LeftButton:
-            self.move(ev.globalPos() - self._drag_pos)
+            self._move_to_global(ev.globalPos() - self._drag_pos)
             return
         super().mouseMoveEvent(ev)
 
@@ -417,7 +480,8 @@ QPushButton#titleBtn:checked { background: %(accent)s; }
         g = self.frameGeometry()
         x = sr.left() + (sr.width() - g.width()) // 2
         y = sr.top() + (sr.height() - g.height()) // 2
-        self.move(x, y)
+        # 子面板形态：move() 需父坐标换算（_move_to_global 内部处理两种形态）
+        self._move_to_global(QPoint(x, y))
         self.show()
         self.raise_()
         self.activateWindow()

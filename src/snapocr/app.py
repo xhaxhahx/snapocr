@@ -187,6 +187,14 @@ class CaptureController(QObject):
         self.overlays = overlays
         for ov in overlays:
             ov.start()
+        # A 方案：把屏上的钉住预览窗（上一会话转正的顶层窗）借回为本会话
+        # 遮罩的子面板——会话期间其可见性由父子关系确定性保证，kwin 的
+        # 点击抬升无法影响；会话结束时 _close_overlays 再转正归还。
+        for w in QApplication.topLevelWidgets():
+            if isinstance(w, PreviewDialog) and w.pinned and w.isVisible():
+                host = self._overlay_host_for(w)
+                if host is not None:
+                    w.set_embedded(True, host=host)
         hint = self._capture_hint(first_pm)
         if hint:
             QTimer.singleShot(280, lambda: self._show_capture_hint(overlays, hint))
@@ -218,9 +226,20 @@ class CaptureController(QObject):
             target._toast(hint)
 
     def _close_overlays(self):
+        # A 方案：会话结束先把钉住的子面板转正为独立顶层窗（跨会话保留），
+        # 必须在 ov.close()/destroy() 之前——遮罩销毁会连带销毁其子控件，
+        # 转正后的钉住窗脱离父子关系独立存活（sip 陷阱见下方补挂注释）。
+        for ov in self.overlays:
+            for c in ov.children():
+                if isinstance(c, PreviewDialog) and c.pinned and c.isVisible():
+                    c.set_embedded(False)
         # 先清掉本类持有的**已关闭**预览窗强引用（上一轮钉住、此后被 × 的窗），
         # 让 sip 正常回收；存活判定放回收之后做补挂，避免把本轮要保留的误清。
-        self._previews = [w for w in self._previews if w.isVisible()]
+        # 子面板形态下非钉住预览随遮罩销毁（C++ 已删）：isVisible 会抛
+        # RuntimeError，守卫后按"不存活"处理即可。
+        self._previews = [
+            w for w in self._previews if self._preview_alive(w) and w.isVisible()
+        ]
         for ov in self.overlays:
             pv = getattr(ov, "_preview", None)
             # 钉住的预览窗必须由本类**强引用**：PreviewDialog 无父级，PyQt 里归
@@ -252,6 +271,23 @@ class CaptureController(QObject):
         gc.collect()
         QPixmapCache.clear()
 
+    @staticmethod
+    def _preview_alive(w):
+        """预览窗 C++ 对象是否存活：子面板可能已随遮罩销毁（sip 包装器悬空）。"""
+        with contextlib.suppress(RuntimeError):
+            return w.isVisible()
+        return False
+
+    def _overlay_host_for(self, pv):
+        """按预览窗中心点选择宿主遮罩（多屏：预览应回到它所在的屏幕）。"""
+        c = pv.mapToGlobal(pv.geometry().center())
+        for ov in self.overlays:
+            wh = ov.windowHandle()
+            scr = wh.screen() if wh is not None else QApplication.primaryScreen()
+            if scr.geometry().contains(c):
+                return ov
+        return self.overlays[0] if len(self.overlays) == 1 else None
+
     def _restore_windows(self):
         for w in self._hiding:
             if w is self.result or getattr(w, "_snap_user_closed", False):
@@ -273,7 +309,10 @@ class CaptureController(QObject):
         """PreviewDialog.closeEvent 宿主钩子（挂在 QApplication 实例，见 SnapApp）。"""
         # 已关闭的预览窗立即摘出强引用表：其合成 QImage 可达全屏大小（~8MB），
         # 留到下一轮会话结束才清会造成可观的滞留（docs/15 L1-c）。
-        self._previews = [w for w in self._previews if w.isVisible()]
+        # 子面板可能已随遮罩销毁：isVisible 守卫防 sip 悬空包装器炸裂。
+        self._previews = [
+            w for w in self._previews if self._preview_alive(w) and w.isVisible()
+        ]
         self._maybe_quit_once()
 
     def _raise_pinned_previews(self):
@@ -523,6 +562,17 @@ class CaptureController(QObject):
                 self._detach_worker(self.worker)
                 self.worker = None
             self.result.close()
+        # 未钉住的预览窗一并关闭（钉住窗保留跨会话语义）。子面板形态
+        # close() 是 no-op（非窗口）——用 hide()；顶层形态保持 close()。
+        for ov in self.overlays:
+            pv = getattr(ov, "_preview", None)
+            if (
+                isinstance(pv, PreviewDialog)
+                and not getattr(pv, "pinned", False)
+                and self._preview_alive(pv)
+                and pv.isVisible()
+            ):
+                pv.hide()
         for w in QApplication.topLevelWidgets():
             if isinstance(w, PreviewDialog) and not getattr(w, "pinned", False) and w.isVisible():
                 w.close()

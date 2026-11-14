@@ -1059,7 +1059,12 @@ class OverlayWindow(QWidget):
         RuntimeError —— 此时会话早已结束，无需再发信号，直接忽略即可。
         """
         if not getattr(pv, "pinned", False):
-            pv.close()
+            # 子面板形态 close() 是 no-op（非窗口），用 hide()；顶层形态保持
+            # close()——closeEvent 的 closed 信号链（once 模式进程去留判定）依赖它
+            if pv.parentWidget() is not None:
+                pv.hide()
+            else:
+                pv.close()
         with contextlib.suppress(RuntimeError):
             self.finished.emit()
 
@@ -1073,7 +1078,10 @@ class OverlayWindow(QWidget):
             self._preview = None
         self.canvas._commit_pending_text()
         img = self.composite()
-        pv = PreviewDialog(img, self.cfg)
+        # A 方案：预览窗以"遮罩子面板"形态存在——父子关系保证其恒前置于遮罩
+        # 内容，kwin 的点击抬升（全屏遮罩会盖住独立置顶窗，2026-11-14 实测）
+        # 无法影响；钉住跨会话时的形态迁移见 PreviewDialog.set_embedded。
+        pv = PreviewDialog(img, self.cfg, parent=self, embedded=True)
         # 钉住态：动作完成后**不关闭**预览窗，但仍结束截图会话（overlay/画布/引擎全部回收），
         # 由 PreviewDialog.closed → 宿主判定进程去留（2026-10-27 需求 §5）。
         pv.copyDone.connect(lambda: self._on_preview_finished(pv))
