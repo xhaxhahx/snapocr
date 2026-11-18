@@ -746,7 +746,13 @@ def run(ctx):
         if _pinned:
             _pv.btn_pin.setChecked(True)
             _QT14.qWait(40)
-        # 模拟真实退出路径：close() + deleteLater()（与 app._close_overlays 一致）
+        # 模拟真实退出路径（与 app._close_overlays 一致）：先把钉住的子面板
+        # 转正为独立顶层窗（A 方案：预览以遮罩子面板形态存在，转正后才能在
+        # 遮罩销毁后存活），再 close() + deleteLater()。少了转正步骤，
+        # 嵌入面板随遮罩销毁 → Z17 全线误报（2026-11-19 同步修正）。
+        for _c in _ov.children():
+            if type(_c).__name__ == "PreviewDialog" and getattr(_c, "pinned", False) and _c.isVisible():
+                _c.set_embedded(False)
         _ov.close()
         _ov.deleteLater()
         app.processEvents()
